@@ -12,12 +12,17 @@ test('repeated local authentication does not create spaces', async ({ isolated, 
   await request.dispose()
 })
 
-test('OIDC authorization-code flow reuses identities and creates one paired account', async ({ isolated, page }) => {
+for (const [index, provider] of ['github', 'gitlab', 'google', 'keycloak', 'auth0', 'entra', 'okta', 'zitadel', 'authentik'].entries()) test(`OIDC ${provider} completes browser authorization-code flow`, async ({ isolated, page }) => {
   test.skip(!isolated, 'set YIN_PANEL_TEST_BINARY and YIN_PANEL_TEST_WEB_DIR')
   const db = new Database(isolated.database)
   const before = db.prepare('select count(*) as count from user').get().count
-  await page.goto(`${isolated.url}/api/oauth/mock`)
-  await expect(page).toHaveURL(/\/$/)
+  const providerResponse = await page.request.get(`${isolated.url}/api/oauth/config`)
+  const providerBody = await providerResponse.json()
+  expect(providerBody.data?.providers).toEqual(expect.arrayContaining(['github', 'gitlab', 'google', 'keycloak', 'auth0', 'entra', 'okta', 'zitadel', 'authentik']))
+  await page.goto(`${isolated.url}/api/oauth/${provider}`)
+  const stats = await (await fetch(`${isolated.oidc.issuer}/test/stats`)).json()
+  expect(stats.authorizationCount).toBe(index + 1)
+  expect(stats.tokenCount).toBe(index + 1)
   const afterFirst = db.prepare('select count(*) as count from user').get().count
   expect(afterFirst).toBe(before)
   expect(db.prepare("select count(*) as count from space where owner_user_id = (select id from user where mail = 'admin@yiniot.com')").get().count).toBe(2)

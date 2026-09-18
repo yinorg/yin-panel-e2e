@@ -9,16 +9,20 @@ export async function startMockOIDC() {
   const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 })
   const jwk = publicKey.export({ format: 'jwk' })
   const codes = new Map()
+  let authorizationCount = 0
+  let tokenCount = 0
   let profile = { email: 'admin@yiniot.com', sub: 'admin-subject', verified: true }
   const issuer = { value: '' }
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1')
     const send = (status, value, headers = { 'content-type': 'application/json' }) => { res.writeHead(status, headers); res.end(JSON.stringify(value)) }
     if (url.pathname === '/test/profile') { profile = { email: url.searchParams.get('email') || profile.email, sub: url.searchParams.get('sub') || profile.sub, verified: url.searchParams.get('verified') !== 'false' }; return send(200, { ok: true }) }
+    if (url.pathname === '/test/stats') return send(200, { authorizationCount, tokenCount })
     if (url.pathname === '/.well-known/openid-configuration') return send(200, { issuer: issuer.value, authorization_endpoint: `${issuer.value}/authorize`, token_endpoint: `${issuer.value}/token`, jwks_uri: `${issuer.value}/jwks` })
     if (url.pathname === '/jwks') return send(200, { keys: [{ ...jwk, kid: 'e2e-key', use: 'sig', alg: 'RS256' }] })
     if (url.pathname === '/authorize') {
       const code = crypto.randomBytes(16).toString('hex')
+      authorizationCount += 1
       codes.set(code, Object.fromEntries(url.searchParams))
       res.writeHead(302, { location: `${url.searchParams.get('redirect_uri')}?code=${code}&state=${url.searchParams.get('state')}` }); return res.end()
     }
@@ -27,6 +31,7 @@ export async function startMockOIDC() {
       const request = codes.get(body.get('code'))
       if (!request || request.code_challenge !== b64(crypto.createHash('sha256').update(body.get('code_verifier') || '').digest())) return send(400, { error: 'invalid_grant' })
       const email = profile.email
+      tokenCount += 1
       const verified = profile.verified
       const now = Math.floor(Date.now() / 1000)
       const claims = { iss: issuer.value, sub: request.sub || email, aud: request.client_id, nonce: request.nonce, iat: now, exp: now + 300, email, email_verified: verified, name: email.split('@')[0], groups: request.groups ? request.groups.split(',') : [] }
