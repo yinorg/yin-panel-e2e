@@ -8,6 +8,7 @@
     "provision-member": "node scripts/provision-member.mjs"
   },
   "devDependencies": {
-    "@playwright/test": "^1.55.0"
+    "@playwright/test": "^1.55.0",
+    "better-sqlite3": "^11.7.0"
   }
 }
