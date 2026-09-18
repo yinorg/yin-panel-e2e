@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
-    "test:headed": "playwright test --headed"
+    "test:headed": "playwright test --headed",
+    "provision-member": "node scripts/provision-member.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0"
