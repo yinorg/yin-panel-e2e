@@ -18,6 +18,20 @@ export async function startMockOIDC() {
     const send = (status, value, headers = { 'content-type': 'application/json' }) => { res.writeHead(status, headers); res.end(JSON.stringify(value)) }
     if (url.pathname === '/test/profile') { profile = { email: url.searchParams.get('email') || profile.email, sub: url.searchParams.get('sub') || profile.sub, verified: url.searchParams.get('verified') !== 'false' }; return send(200, { ok: true }) }
     if (url.pathname === '/test/stats') return send(200, { authorizationCount, tokenCount })
+    if (url.pathname === '/github/authorize') {
+      const code = crypto.randomBytes(16).toString('hex')
+      authorizationCount += 1
+      codes.set(code, Object.fromEntries(url.searchParams))
+      res.writeHead(302, { location: `${url.searchParams.get('redirect_uri')}?code=${code}&state=${url.searchParams.get('state')}` }); return res.end()
+    }
+    if (url.pathname === '/github/token') {
+      const body = new URLSearchParams(await new Promise(resolve => { let raw = ''; req.on('data', c => { raw += c }); req.on('end', () => resolve(raw)) }))
+      if (!codes.has(body.get('code'))) return send(400, { error: 'invalid_grant' })
+      tokenCount += 1
+      return send(200, { access_token: 'github-access-token', token_type: 'bearer' })
+    }
+    if (url.pathname === '/github/user') return send(200, { id: 4242, login: 'e2e-github', name: 'E2E GitHub', email: null })
+    if (url.pathname === '/github/emails') return send(200, [{ email: profile.email, primary: true, verified: profile.verified }])
     if (url.pathname === '/.well-known/openid-configuration') return send(200, { issuer: issuer.value, authorization_endpoint: `${issuer.value}/authorize`, token_endpoint: `${issuer.value}/token`, jwks_uri: `${issuer.value}/jwks` })
     if (url.pathname === '/jwks') return send(200, { keys: [{ ...jwk, kid: 'e2e-key', use: 'sig', alg: 'RS256' }] })
     if (url.pathname === '/authorize') {
