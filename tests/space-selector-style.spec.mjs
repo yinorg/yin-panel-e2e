@@ -1,0 +1,55 @@
+import { test, expect } from '@playwright/test'
+import { authHeaders, getSpaces, loginPage, login } from './helpers.mjs'
+
+test('space selector uses the translucent dark theme and switches spaces', async ({ request, page }) => {
+  test.skip(!process.env.YIN_PANEL_URL, 'YIN_PANEL_URL is not configured')
+
+  const user = await login(request)
+  const spaces = await getSpaces(request, authHeaders(user))
+  expect(spaces.length, 'test account has no spaces').toBeGreaterThan(0)
+
+  await loginPage(page)
+  const statusBar = page.locator('.space-status-bar')
+  const selector = page.locator('.space-status-button')
+  await expect(statusBar).toBeVisible()
+  await expect(selector).toBeVisible()
+
+  await selector.hover()
+  const menu = page.locator('.n-dropdown-menu:visible').last()
+  await expect(menu).toBeVisible()
+
+  const menuStyle = await menu.evaluate(element => {
+    const style = getComputedStyle(element)
+    return {
+      backgroundColor: style.backgroundColor,
+      borderRadius: style.borderRadius,
+      boxShadow: style.boxShadow,
+    }
+  })
+  expect(menuStyle.backgroundColor).not.toBe('rgb(255, 255, 255)')
+  expect(menuStyle.backgroundColor).toMatch(/rgba\(18, 22, 28, 0\.72\)|rgb\(18, 22, 28\)/)
+  expect(menuStyle.borderRadius).toBe('10px')
+  expect(menuStyle.boxShadow).not.toBe('none')
+
+  const option = menu.locator('.n-dropdown-option').first()
+  const optionLabel = option.locator('.n-dropdown-option-body__label')
+  const optionStyle = await optionLabel.evaluate(element => {
+    const style = getComputedStyle(element)
+    return { color: style.color, backgroundColor: style.backgroundColor }
+  })
+  expect(optionStyle.color).toMatch(/rgb\(255, 255, 255\)|rgba\(255, 255, 255, 0\.92\)/)
+  await option.hover()
+  const hoverColor = await option.evaluate(element => getComputedStyle(element).getPropertyValue('--n-option-color-hover').trim())
+  expect(hoverColor).toMatch(/rgba\(255, 255, 255, 0\.14\)|rgb\(255, 255, 255\)/)
+
+  if (spaces.length > 1) {
+    const options = menu.locator('.n-dropdown-option')
+    const targetOption = options.nth(1)
+    const targetLabel = (await targetOption.innerText()).trim()
+    await targetOption.click()
+    await expect(menu).toBeHidden()
+    await expect(selector).toContainText(targetLabel)
+  } else {
+    await expect(menu.locator('.n-dropdown-option')).toHaveCount(1)
+  }
+})
