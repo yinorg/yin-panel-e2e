@@ -10,6 +10,14 @@ This repository contains Playwright acceptance tests for a running Yin-Panel ser
 - Run focused Playwright tests for changed scenarios, then run the broader suite when the shared helpers or configuration change.
 - Run `git diff --check` and report every skipped or failed check.
 
+## Test Placement and Ownership
+
+- Store all Playwright tests in `tests/` and name them `*.spec.mjs`; group files by user workflow or subsystem, such as `extension-newtab.spec.mjs`.
+- Use this repository for cross-repository acceptance coverage and real-browser behavior, including loading the unpacked extension and exercising Core plus extension workflows.
+- Keep tests that exercise only extension-local logic in the extension repository under its `tests/` directory; do not duplicate them here.
+- Load the extension from `YIN_PANEL_EXTENSION_DIR` and test the checked-out or packaged source explicitly. Do not copy extension or Core source into this repository and do not modify those repositories from tests.
+- Keep test fixtures, helpers, and browser setup in this repository; keep test results and generated reports ignored and untracked.
+
 ## Environment and Commands
 
 - Use `npm test` for the default suite and `npm run test:headed` for headed local debugging.
