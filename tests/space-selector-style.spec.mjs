@@ -31,25 +31,28 @@ test('space selector uses the translucent dark theme and switches spaces', async
   expect(menuStyle.borderRadius).toBe('10px')
   expect(menuStyle.boxShadow).not.toBe('none')
 
-  const option = menu.locator('.n-dropdown-option').first()
-  const optionLabel = option.locator('.n-dropdown-option-body__label')
-  const optionStyle = await optionLabel.evaluate(element => {
-    const style = getComputedStyle(element)
-    return { color: style.color, backgroundColor: style.backgroundColor }
-  })
-  expect(optionStyle.color).toMatch(/rgb\(255, 255, 255\)|rgba\(255, 255, 255, 0\.92\)/)
-  await option.hover()
-  const hoverColor = await option.evaluate(element => getComputedStyle(element).getPropertyValue('--n-option-color-hover').trim())
-  expect(hoverColor).toMatch(/rgba\(255, 255, 255, 0\.14\)|rgb\(255, 255, 255\)/)
+  const options = menu.locator('.n-dropdown-option')
+  await expect(options).toHaveCount(Math.max(spaces.length - 1, 0))
 
   if (spaces.length > 1) {
-    const options = menu.locator('.n-dropdown-option')
-    const targetOption = options.nth(1)
+    const currentLabel = (await selector.innerText()).replace('⌄', '').trim()
+    expect(await options.allInnerTexts()).not.toContain(currentLabel)
+
+    const option = options.first()
+    const optionLabel = option.locator('.n-dropdown-option-body__label')
+    const optionStyle = await optionLabel.evaluate(element => {
+      const style = getComputedStyle(element)
+      return { color: style.color, backgroundColor: style.backgroundColor }
+    })
+    expect(optionStyle.color).toMatch(/rgb\(255, 255, 255\)|rgba\(255, 255, 255, 0\.92\)/)
+    await option.hover()
+    const hoverColor = await option.evaluate(element => getComputedStyle(element).getPropertyValue('--n-option-color-hover').trim())
+    expect(hoverColor).toMatch(/rgba\(255, 255, 255, 0\.14\)|rgb\(255, 255, 255\)/)
+
+    const targetOption = options.first()
     const targetLabel = (await targetOption.innerText()).trim()
     await targetOption.click()
     await expect(menu).toBeHidden()
     await expect(selector).toContainText(targetLabel)
-  } else {
-    await expect(menu.locator('.n-dropdown-option')).toHaveCount(1)
   }
 })
