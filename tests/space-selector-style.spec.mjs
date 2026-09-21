@@ -56,3 +56,23 @@ test('space selector uses the translucent dark theme and switches spaces', async
     await expect(selector).toContainText(targetLabel)
   }
 })
+
+test('floating action buttons clear mouse focus after click', async ({ request, page }) => {
+  test.skip(!process.env.YIN_PANEL_URL, 'YIN_PANEL_URL is not configured')
+
+  const user = await login(request)
+  expect((await getSpaces(request, authHeaders(user))).length, 'test account has no spaces').toBeGreaterThan(0)
+
+  await loginPage(page)
+  const floating = page.locator('.fixed-element .n-button')
+  expect(await floating.count()).toBeGreaterThan(0)
+
+  for (const testId of ['floating-top-button', 'floating-wan-button', 'floating-lan-button', 'system-settings-button']) {
+    const button = page.getByTestId(testId)
+    if (await button.count() === 0) continue
+    await button.click()
+    expect(await page.evaluate(() => document.activeElement?.closest('.fixed-element .n-button') === null)).toBe(true)
+    await page.mouse.move(0, 0)
+    expect(await page.evaluate(() => document.activeElement?.closest('.fixed-element .n-button') === null)).toBe(true)
+  }
+})
