@@ -83,6 +83,11 @@ test('global space command center searches items and runs commands', async ({ pa
     await expect(page.getByTestId('command-center-input')).toBeFocused()
     await center.getByText('/add', { exact: true }).click()
     await expect(page.getByTestId('edit-item-modal')).toBeVisible()
+    await page.locator('.n-modal-container .n-base-close').last().click()
+    await expect(page.getByTestId('edit-item-modal')).toBeHidden()
+    await page.keyboard.press('x')
+    await expect(center).toBeVisible()
+    await page.keyboard.press('Escape')
 
     await page.reload({ waitUntil: 'domcontentloaded' })
     await waitForCreatedItem()
