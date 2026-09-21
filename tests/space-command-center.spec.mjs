@@ -9,6 +9,7 @@ test('global space command center searches items and runs commands', async ({ pa
   const searchConfigBody = await searchConfigResponse.json()
   expect(searchConfigBody.code, searchConfigBody.msg).toBe(0)
   const searchEngineUrl = searchConfigBody.data.currentSearchEngine.url
+  const searchEngineTitle = searchConfigBody.data.currentSearchEngine.title
   const suffix = `${Date.now().toString().slice(-8)}${Math.random().toString(36).slice(2, 5)}`
   const staleGroups = await (await request.get(`/api/spaces/${space.id}/groups`, { headers })).json()
   for (const group of staleGroups.data || []) {
@@ -77,6 +78,20 @@ test('global space command center searches items and runs commands', async ({ pa
 
     await page.keyboard.press('Escape')
     await expect(center).toBeHidden()
+
+    await page.keyboard.press('/')
+    await expect(center).toBeVisible()
+    const centerInput = page.getByTestId('command-center-input')
+    await expect(centerInput).toHaveValue('/')
+    await expect(center.getByText('/add', { exact: true })).toBeVisible()
+    await expect(center.getByTestId('command-center-submit-search')).toHaveCount(0)
+    await centerInput.press('Backspace')
+    await expect(centerInput).toHaveValue('')
+    await expect(center.getByTestId('command-center-search-engine')).toHaveAttribute('title', searchEngineTitle)
+    await expect(center.getByTestId('command-center-submit-search')).toBeVisible()
+    await centerInput.fill(item.title)
+    await expect(center.getByText(item.title, { exact: true })).toBeVisible()
+    await page.keyboard.press('Escape')
 
     await page.keyboard.press('/')
     await expect(center).toBeVisible()
