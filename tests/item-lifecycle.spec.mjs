@@ -6,7 +6,11 @@ test.describe('item lifecycle', () => {
     const user = await login(request)
     const headers = authHeaders(user)
     const space = await createSpace(request, headers)
-    const group = await getFirstGroup(request, space.id, headers)
+    const groupTitle = `E2E Item Lifecycle ${Date.now()}`
+    const groupResponse = await request.post(`/api/spaces/${space.id}/groups`, { headers, data: { title: groupTitle } })
+    const groupBody = await groupResponse.json()
+    expect(groupBody.code, groupBody.msg).toBe(0)
+    const group = groupBody.data
     const baseURL = process.env.YIN_PANEL_URL
     const urls = {
       wan: `${baseURL}/?e2e-target=wan`,
@@ -20,9 +24,13 @@ test.describe('item lifecycle', () => {
       await loginPage(itemPage)
       if (switchToLan)
         await itemPage.getByTitle(/switch to lan mode/i).click()
-      await expect(itemPage.getByText('Mobile URL E2E', { exact: true })).toBeVisible()
+      const groupHeading = itemPage.locator('[data-item-group]').filter({ hasText: group.title }).first()
+      await expect(groupHeading).toBeVisible()
+      await groupHeading.scrollIntoViewIfNeeded()
+      const item = groupHeading.getByText('Mobile URL E2E', { exact: true })
+      await expect(item).toBeVisible()
       const popupPromise = itemPage.waitForEvent('popup')
-      await itemPage.getByText('Mobile URL E2E', { exact: true }).click()
+      await item.click()
       const popup = await popupPromise
       await expect.poll(() => popup.url()).toBe(expectedUrl)
       await popup.close()
@@ -42,7 +50,6 @@ test.describe('item lifecycle', () => {
       await modal.getByPlaceholder(/mobile devices in WAN mode only/i).fill(urls.mobile)
       await modal.getByPlaceholder('Please Input').last().fill('mobile URL coverage')
       await modal.locator('input[type="radio"][value="1"]').check({ force: true })
-      await modal.locator('input[type="text"]').nth(2).fill('MU')
 
       const createResponse = page.waitForResponse(response => response.url().includes(`/api/spaces/${space.id}/items`) && response.request().method() === 'POST' && !response.url().includes('with-icon'))
       await modal.getByRole('button', { name: /save/i }).click()
@@ -55,13 +62,20 @@ test.describe('item lifecycle', () => {
       expect(storedBody.data.find(item => item.id === itemId).mobileUrl).toBe(urls.mobile)
 
       await openItem(browser, urls.wan)
-      const mobileContext = await browser.newContext({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148' })
+      const mobileUserAgent = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148'
+      const mobileContext = await browser.newContext({ userAgent: mobileUserAgent })
       try {
         await openItem(mobileContext, urls.mobile)
-        await openItem(mobileContext, urls.lan, true)
       }
       finally {
         await mobileContext.close()
+      }
+      const lanMobileContext = await browser.newContext({ userAgent: mobileUserAgent })
+      try {
+        await openItem(lanMobileContext, urls.lan, true)
+      }
+      finally {
+        await lanMobileContext.close()
       }
 
       const created = storedBody.data.find(item => item.id === itemId)
@@ -82,6 +96,7 @@ test.describe('item lifecycle', () => {
     }
     finally {
       if (itemId) await deleteItem(request, space.id, itemId, headers)
+      await request.delete(`/api/spaces/${space.id}/groups/${group.id}`, { headers }).catch(() => {})
     }
   })
 
