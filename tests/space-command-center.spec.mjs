@@ -5,6 +5,10 @@ test('global space command center searches items and runs commands', async ({ pa
   const user = await login(request)
   const headers = authHeaders(user)
   const space = await createSpace(request, headers)
+  const searchConfigResponse = await request.get(`/api/spaces/${space.id}/search-config`, { headers })
+  const searchConfigBody = await searchConfigResponse.json()
+  expect(searchConfigBody.code, searchConfigBody.msg).toBe(0)
+  const searchEngineUrl = searchConfigBody.data.currentSearchEngine.url
   const suffix = `${Date.now().toString().slice(-8)}${Math.random().toString(36).slice(2, 5)}`
   const staleGroups = await (await request.get(`/api/spaces/${space.id}/groups`, { headers })).json()
   for (const group of staleGroups.data || []) {
@@ -22,7 +26,7 @@ test('global space command center searches items and runs commands', async ({ pa
       title: `CCI ${suffix}`,
       url: `https://example.com/${suffix}`,
       itemIconGroupId: group.id,
-      openMethod: 1,
+      openMethod: 2,
     })
     await loginPage(page)
 
@@ -41,6 +45,36 @@ test('global space command center searches items and runs commands', async ({ pa
     await expect(center).toBeVisible()
     await expect(center.getByText(item.title, { exact: true })).toBeVisible()
     await expect(center.getByRole('button').filter({ hasText: item.url })).toHaveCount(1)
+
+    const searchPopup = page.waitForEvent('popup')
+    await page.keyboard.press('Enter')
+    const searchPage = await searchPopup
+    const expectedSearchUrl = searchEngineUrl.includes('%s')
+      ? searchEngineUrl.replace('%s', encodeURIComponent(item.title))
+      : searchEngineUrl + encodeURIComponent(item.title)
+    await expect.poll(() => searchPage.url()).toContain(expectedSearchUrl)
+    await searchPage.close()
+
+    await page.keyboard.press('Escape')
+    await page.keyboard.type(item.title)
+    await expect(center).toBeVisible()
+    await page.keyboard.press('ArrowDown')
+    const itemPopup = page.waitForEvent('popup')
+    await page.keyboard.press('Enter')
+    const itemPage = await itemPopup
+    await expect.poll(() => itemPage.url()).toBe(item.url)
+    await itemPage.close()
+
+    await page.keyboard.press('Escape')
+    await page.keyboard.type(item.title)
+    await expect(center).toBeVisible()
+    await center.getByRole('button').filter({ hasText: item.url }).hover()
+    const hoveredItemPopup = page.waitForEvent('popup')
+    await page.keyboard.press('Enter')
+    const hoveredItemPage = await hoveredItemPopup
+    await expect.poll(() => hoveredItemPage.url()).toBe(item.url)
+    await hoveredItemPage.close()
+
     await page.keyboard.press('Escape')
     await expect(center).toBeHidden()
 
