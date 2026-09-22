@@ -1,39 +1,48 @@
 import { chromium, expect, test } from '@playwright/test'
+import os from 'node:os'
+import path from 'node:path'
 import { getFirstGroup, getItems, getSpaces, login, loginPage, authHeaders } from '../helpers.mjs'
 
+const profileRunId = `${process.pid}-${Date.now()}`
+const sharedProfileRoot = path.join(os.tmpdir(), `yin-panel-pwa-${profileRunId}`)
+
 async function openProfile(testInfo, name, offline = false) {
-  const profile = testInfo.outputPath(name)
+  const profile = name === 'warm-profile'
+    ? path.join(sharedProfileRoot, name)
+    : testInfo.outputPath(`${name}-${profileRunId}`)
   const context = await chromium.launchPersistentContext(profile, { headless: true, offline })
   return { context, page: await context.newPage() }
+}
+
+async function serviceWorkerState(page) {
+  return page.evaluate(async () => {
+    if (!('serviceWorker' in navigator)) return { secure: isSecureContext, active: null, installing: null, waiting: null, controlled: false }
+    const registration = await navigator.serviceWorker.getRegistration()
+    return {
+      secure: isSecureContext,
+      active: registration?.active?.state || null,
+      installing: registration?.installing?.state || null,
+      waiting: registration?.waiting?.state || null,
+      controlled: Boolean(navigator.serviceWorker.controller),
+    }
+  })
 }
 
 async function assertControlled(page) {
   await expect(page).toHaveURL(/\/$/)
   await expect.poll(
-    () => page.evaluate(async () => {
-      if (!('serviceWorker' in navigator)) return { secure: isSecureContext, active: false, controlled: false }
-      const registration = await navigator.serviceWorker.ready
-      return {
-        secure: isSecureContext,
-        active: registration.active?.state === 'activated',
-        controlled: Boolean(navigator.serviceWorker.controller),
-      }
-    }),
+    () => serviceWorkerState(page),
     { timeout: 60000, intervals: [250, 500, 1000, 2000] },
-  ).toEqual({ secure: true, active: true, controlled: true })
+  ).toEqual({ secure: true, active: 'activated', installing: null, waiting: null, controlled: true })
   await page.reload({ waitUntil: 'domcontentloaded' })
   await expect(page.getByTestId('pwa-ready')).toBeVisible({ timeout: 30000 })
 }
 
 async function waitForInstalledWorker(page) {
   await expect.poll(
-    () => page.evaluate(async () => {
-      if (!('serviceWorker' in navigator)) return { active: false, controlled: false }
-      const registration = await navigator.serviceWorker.ready
-      return { active: registration.active?.state === 'activated', controlled: Boolean(navigator.serviceWorker.controller) }
-    }),
+    () => serviceWorkerState(page),
     { timeout: 60000, intervals: [250, 500, 1000, 2000] },
-  ).toEqual({ active: true, controlled: true })
+  ).toEqual({ secure: true, active: 'activated', installing: null, waiting: null, controlled: true })
 }
 
 async function cacheUrls(page) {
@@ -93,10 +102,27 @@ test('online warmup then offline reload remains readable after browser restart',
     await expect(restarted.page.getByTestId('offline-readonly')).toBeVisible()
     await expectItemRendered(restarted.page)
   } finally { await restarted.context.close() }
+
+  const member = await login(request, { mail: process.env.YIN_PANEL_TEST_MEMBER_USER, password: process.env.YIN_PANEL_TEST_MEMBER_PASSWORD })
+  const switched = await openProfile(testInfo, 'warm-profile')
+  try {
+    await switched.page.goto('/')
+    await expectItemRendered(switched.page)
+    await switched.page.addInitScript((user) => {
+      sessionStorage.setItem('authStorage', JSON.stringify({ data: { token: user.token, userInfo: user }, expire: null }))
+    }, member)
+    const primaryCacheKeys = await switched.page.evaluate((userId) => Object.keys(localStorage).filter(key => key.startsWith(`yin-panel-space-cache:${userId}:`) || key === `yin-panel-spaces-cache:${userId}`), user.id)
+    expect(primaryCacheKeys.length, 'account A cache should remain in the profile').toBeGreaterThan(0)
+    await switched.context.setOffline(true)
+    await switched.page.goto('/')
+    await expect(switched.page.getByTestId('offline-unavailable')).toBeVisible()
+    await expect(switched.page.getByTestId('offline-readonly')).toHaveCount(0)
+    await expect(switched.page.getByTestId('home-item')).toHaveCount(0)
+  } finally { await switched.context.close() }
 })
 
 test('installed shell without home cache reports explicit offline unavailable state', async ({}, testInfo) => {
-  const profile = testInfo.outputPath('cold-profile')
+  const profile = testInfo.outputPath(`cold-profile-${profileRunId}`)
   const online = await chromium.launchPersistentContext(profile, { headless: true })
   try {
     const page = await online.newPage()
@@ -113,27 +139,4 @@ test('installed shell without home cache reports explicit offline unavailable st
     await expect(page.locator('[data-testid="loading"]')).toHaveCount(0)
     await expect(page).not.toHaveURL(/\/login/)
   } finally { await offline.close() }
-})
-
-test('offline cache is isolated between configured accounts', async ({ request }, testInfo) => {
-  test.skip(!process.env.YIN_PANEL_TEST_MEMBER_USER || !process.env.YIN_PANEL_TEST_MEMBER_PASSWORD, 'member credentials are not configured')
-  const primary = await login(request)
-  const spaces = await getSpaces(request, authHeaders(primary))
-  const spaceId = process.env.YIN_PANEL_TEST_SPACE_ID || spaces[0]?.id
-  const group = await getFirstGroup(request, spaceId, authHeaders(primary))
-  const items = await getItems(request, spaceId, authHeaders(primary), group.id)
-  expect(items.length).toBeGreaterThan(0)
-  const primaryText = String(items[0].title || items[0].name || items[0].url)
-  const profile = await openProfile(testInfo, 'isolation-profile')
-  try {
-    await loginPage(profile.page)
-    await assertControlled(profile.page)
-    await expectItemRendered(profile.page)
-    await profile.context.setOffline(false)
-    await profile.page.getByRole('button', { name: /logout|退出/i }).click().catch(() => {})
-    await loginPage(profile.page, { mail: process.env.YIN_PANEL_TEST_MEMBER_USER, password: process.env.YIN_PANEL_TEST_MEMBER_PASSWORD })
-    await profile.context.setOffline(true)
-    await profile.page.reload().catch(() => {})
-    await expect(profile.page.getByText(primaryText, { exact: false })).toHaveCount(0)
-  } finally { await profile.context.close() }
 })
