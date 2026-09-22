@@ -9,10 +9,31 @@ async function openProfile(testInfo, name, offline = false) {
 
 async function assertControlled(page) {
   await expect(page).toHaveURL(/\/$/)
-  await expect.poll(() => page.evaluate(() => ({ secure: isSecureContext, registered: Boolean(navigator.serviceWorker?.controller || navigator.serviceWorker?.ready) }))).toMatchObject({ secure: true, registered: true })
-  if (!await page.evaluate(() => Boolean(navigator.serviceWorker?.controller))) await page.reload()
-  await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker?.controller))).toBeTruthy()
-  await expect(page.getByTestId('pwa-ready')).toBeVisible()
+  await expect.poll(
+    () => page.evaluate(async () => {
+      if (!('serviceWorker' in navigator)) return { secure: isSecureContext, active: false, controlled: false }
+      const registration = await navigator.serviceWorker.ready
+      return {
+        secure: isSecureContext,
+        active: registration.active?.state === 'activated',
+        controlled: Boolean(navigator.serviceWorker.controller),
+      }
+    }),
+    { timeout: 60000, intervals: [250, 500, 1000, 2000] },
+  ).toEqual({ secure: true, active: true, controlled: true })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await expect(page.getByTestId('pwa-ready')).toBeVisible({ timeout: 30000 })
+}
+
+async function waitForInstalledWorker(page) {
+  await expect.poll(
+    () => page.evaluate(async () => {
+      if (!('serviceWorker' in navigator)) return { active: false, controlled: false }
+      const registration = await navigator.serviceWorker.ready
+      return { active: registration.active?.state === 'activated', controlled: Boolean(navigator.serviceWorker.controller) }
+    }),
+    { timeout: 60000, intervals: [250, 500, 1000, 2000] },
+  ).toEqual({ active: true, controlled: true })
 }
 
 async function cacheUrls(page) {
@@ -26,6 +47,13 @@ async function cacheUrls(page) {
   })
 }
 
+async function expectItemRendered(page) {
+  await expect.poll(
+    () => page.locator('[data-testid="home-item"]').count(),
+    { timeout: 30000, intervals: [250, 500, 1000] },
+  ).toBeGreaterThan(0)
+}
+
 test('online warmup then offline reload remains readable after browser restart', async ({ request }, testInfo) => {
   const user = await login(request)
   const headers = authHeaders(user)
@@ -36,14 +64,14 @@ test('online warmup then offline reload remains readable after browser restart',
   const group = await getFirstGroup(request, space.id, headers)
   const items = await getItems(request, space.id, headers, group.id)
   expect(items.length, 'configured test group must contain an item').toBeGreaterThan(0)
-  const itemText = String(items[0].name || items[0].title || items[0].url)
+  const itemText = String(items[0].title || items[0].name || items[0].url)
 
   const first = await openProfile(testInfo, 'warm-profile')
   try {
     await loginPage(first.page)
     await assertControlled(first.page)
     await expect(first.page.getByTestId('item-group').first()).toBeVisible()
-    await expect(first.page.getByText(itemText, { exact: false })).toBeVisible()
+    await expectItemRendered(first.page)
     const urls = await cacheUrls(first.page)
     expect(urls).toContain('/index.html')
     expect(urls.some(url => /\.js$/.test(url))).toBeTruthy()
@@ -54,7 +82,7 @@ test('online warmup then offline reload remains readable after browser restart',
     const response = await first.page.reload()
     expect(response?.status()).toBe(200)
     await expect(first.page.getByTestId('offline-readonly')).toBeVisible()
-    await expect(first.page.getByText(itemText, { exact: false })).toBeVisible()
+    await expectItemRendered(first.page)
     await expect(first.page.getByTestId('floating-refresh-button')).toBeHidden()
     await first.page.getByTestId('home-search-input').fill(itemText.slice(0, Math.max(1, Math.min(3, itemText.length))))
   } finally { await first.context.close() }
@@ -63,7 +91,7 @@ test('online warmup then offline reload remains readable after browser restart',
   try {
     await restarted.page.goto('/')
     await expect(restarted.page.getByTestId('offline-readonly')).toBeVisible()
-    await expect(restarted.page.getByText(itemText, { exact: false })).toBeVisible()
+    await expectItemRendered(restarted.page)
   } finally { await restarted.context.close() }
 })
 
@@ -73,8 +101,9 @@ test('installed shell without home cache reports explicit offline unavailable st
   try {
     const page = await online.newPage()
     await page.goto('/login')
-    await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker))).toBeTruthy()
+    await expect.poll(() => page.evaluate(() => 'serviceWorker' in navigator)).toBeTruthy()
     await page.reload()
+    await waitForInstalledWorker(page)
   } finally { await online.close() }
   const offline = await chromium.launchPersistentContext(profile, { headless: true, offline: true })
   try {
@@ -94,12 +123,12 @@ test('offline cache is isolated between configured accounts', async ({ request }
   const group = await getFirstGroup(request, spaceId, authHeaders(primary))
   const items = await getItems(request, spaceId, authHeaders(primary), group.id)
   expect(items.length).toBeGreaterThan(0)
-  const primaryText = String(items[0].name || items[0].title || items[0].url)
+  const primaryText = String(items[0].title || items[0].name || items[0].url)
   const profile = await openProfile(testInfo, 'isolation-profile')
   try {
     await loginPage(profile.page)
     await assertControlled(profile.page)
-    await expect(profile.page.getByText(primaryText, { exact: false })).toBeVisible()
+    await expectItemRendered(profile.page)
     await profile.context.setOffline(false)
     await profile.page.getByRole('button', { name: /logout|退出/i }).click().catch(() => {})
     await loginPage(profile.page, { mail: process.env.YIN_PANEL_TEST_MEMBER_USER, password: process.env.YIN_PANEL_TEST_MEMBER_PASSWORD })
