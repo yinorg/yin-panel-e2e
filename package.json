@@ -5,6 +5,7 @@
   "scripts": {
     "test": "playwright test",
     "test:headed": "playwright test --headed",
+    "test:pwa": "playwright test --config=playwright.pwa.config.mjs --fail-on-flaky-tests",
     "provision-member": "node scripts/provision-member.mjs"
   },
   "devDependencies": {
