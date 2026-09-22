@@ -106,7 +106,7 @@ test('online warmup then offline reload remains readable after browser restart',
     await restarted.page.reload()
     await assertControlled(restarted.page)
     await restarted.page.addInitScript((user) => {
-      sessionStorage.setItem('authStorage', JSON.stringify({ data: { token: user.token, userInfo: user }, expire: null }))
+      localStorage.setItem('authStorage', JSON.stringify({ data: { token: user.token, userInfo: user }, expire: null }))
     }, member)
     const primaryCacheKeys = await restarted.page.evaluate((userId) => Object.keys(localStorage).filter(key => key.startsWith(`yin-panel-space-cache:${userId}:`) || key === `yin-panel-spaces-cache:${userId}`), user.id)
     expect(primaryCacheKeys.length, 'account A cache should remain in the profile').toBeGreaterThan(0)
