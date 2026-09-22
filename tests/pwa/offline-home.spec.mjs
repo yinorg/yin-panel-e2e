@@ -101,24 +101,22 @@ test('online warmup then offline reload remains readable after browser restart',
     await restarted.page.goto('/')
     await expect(restarted.page.getByTestId('offline-readonly')).toBeVisible()
     await expectItemRendered(restarted.page)
-  } finally { await restarted.context.close() }
-
-  const member = await login(request, { mail: process.env.YIN_PANEL_TEST_MEMBER_USER, password: process.env.YIN_PANEL_TEST_MEMBER_PASSWORD })
-  const switched = await openProfile(testInfo, 'warm-profile')
-  try {
-    await switched.page.goto('/')
-    await expectItemRendered(switched.page)
-    await switched.page.addInitScript((user) => {
+    const member = await login(request, { mail: process.env.YIN_PANEL_TEST_MEMBER_USER, password: process.env.YIN_PANEL_TEST_MEMBER_PASSWORD })
+    await restarted.context.setOffline(false)
+    await restarted.page.reload()
+    await assertControlled(restarted.page)
+    await restarted.page.addInitScript((user) => {
       sessionStorage.setItem('authStorage', JSON.stringify({ data: { token: user.token, userInfo: user }, expire: null }))
     }, member)
-    const primaryCacheKeys = await switched.page.evaluate((userId) => Object.keys(localStorage).filter(key => key.startsWith(`yin-panel-space-cache:${userId}:`) || key === `yin-panel-spaces-cache:${userId}`), user.id)
+    const primaryCacheKeys = await restarted.page.evaluate((userId) => Object.keys(localStorage).filter(key => key.startsWith(`yin-panel-space-cache:${userId}:`) || key === `yin-panel-spaces-cache:${userId}`), user.id)
     expect(primaryCacheKeys.length, 'account A cache should remain in the profile').toBeGreaterThan(0)
-    await switched.context.setOffline(true)
-    await switched.page.goto('/')
-    await expect(switched.page.getByTestId('offline-unavailable')).toBeVisible()
-    await expect(switched.page.getByTestId('offline-readonly')).toHaveCount(0)
-    await expect(switched.page.getByTestId('home-item')).toHaveCount(0)
-  } finally { await switched.context.close() }
+    await restarted.context.setOffline(true)
+    await restarted.page.reload()
+    await expect(restarted.page.getByTestId('offline-unavailable')).toBeVisible()
+    await expect(restarted.page.getByTestId('offline-readonly')).toHaveCount(0)
+    await expect(restarted.page.getByTestId('home-item')).toHaveCount(0)
+  } finally { await restarted.context.close() }
+
 })
 
 test('installed shell without home cache reports explicit offline unavailable state', async ({}, testInfo) => {
