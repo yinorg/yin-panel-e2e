@@ -2,6 +2,7 @@ import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from './isolated-fixture.mjs'
 import { authHeaders } from './helpers.mjs'
 import { createThemeArchive } from './theme-package-fixture.mjs'
+import { restartIsolatedService } from './isolated-service.mjs'
 import { strToU8, zipSync } from 'fflate'
 import { readFile } from 'node:fs/promises'
 
@@ -123,6 +124,65 @@ test('unsigned install confirmation, authorization, preferences, audit, and unin
     expect(mine.package.manifest.id).toBe('org.yin.default')
     expect(mine.preference.packageId).toBe('org.yin.default')
     expect(mine.preference.mode).toBe('dark')
+  }
+  finally {
+    await request.dispose()
+  }
+})
+
+test('built-in Yin Mist is selectable, renders both schemes, and stays removed after restart', async ({ isolated, playwright, page }) => {
+  test.skip(!isolated, 'set YIN_PANEL_TEST_BINARY, YIN_PANEL_TEST_WEB_DIR, and YIN_PANEL_TEST_LANG_DIR')
+  const request = await playwright.request.newContext({ baseURL: isolated.url })
+  try {
+    const admin = await login(request, adminCredentials)
+    const adminHeaders = authHeaders(admin)
+    const publicPackages = await responseData(await request.get('/api/theme/packages'))
+    expect(publicPackages.some(item => item.id === 'org.yin.mist' && item.name === 'Yin Mist')).toBe(true)
+    const adminPackages = await responseData(await request.get('/api/theme/admin/packages', { headers: adminHeaders }))
+    expect(adminPackages.defaultPackage).toBe('org.yin.default')
+
+    const regular = await createRegularUser(request, adminHeaders, Date.now())
+    const user = await login(request, regular)
+    const userHeaders = authHeaders(user)
+    await page.emulateMedia({ colorScheme: 'light' })
+    await loginInBrowser(page, isolated.url, regular)
+    await page.getByTestId('system-settings-button').click()
+    const packageSelect = page.locator('.theme-page .n-select').nth(2)
+    await expect(packageSelect).toBeVisible()
+    const selectionSaved = page.waitForResponse(response => response.url().includes('/api/theme/preference') && response.request().method() === 'POST')
+    await packageSelect.click()
+    await page.getByText('Yin Mist', { exact: true }).last().click()
+    expect((await (await selectionSaved).json()).code).toBe(0)
+    await page.reload()
+    await expect.poll(() => canvasColor(page)).toBe('#f4f7f6')
+
+    await responseData(await request.post('/api/theme/preference', {
+      headers: userHeaders,
+      data: { packageId: 'org.yin.mist', mode: 'dark' },
+    }))
+    await page.reload()
+    await expect.poll(() => canvasColor(page)).toBe('#151d1c')
+
+    await responseData(await request.post('/api/theme/admin/default', {
+      headers: adminHeaders,
+      data: { packageId: 'org.yin.mist' },
+    }))
+    await responseData(await request.delete('/api/theme/admin/packages/org.yin.mist', { headers: adminHeaders }))
+    const current = await responseData(await request.get('/api/theme/current'))
+    const mine = await responseData(await request.get('/api/theme/mine', { headers: userHeaders }))
+    expect(current.manifest.id).toBe('org.yin.default')
+    expect(mine.package.manifest.id).toBe('org.yin.default')
+    expect(mine.preference.packageId).toBe('org.yin.default')
+    expect(mine.preference.mode).toBe('dark')
+
+    await restartIsolatedService(isolated)
+    const packagesAfterRestart = await responseData(await request.get('/api/theme/packages'))
+    expect(packagesAfterRestart.some(item => item.id === 'org.yin.mist')).toBe(false)
+    const selectionAfterRemoval = await request.post('/api/theme/preference', {
+      headers: userHeaders,
+      data: { packageId: 'org.yin.mist', mode: 'light' },
+    })
+    expect((await selectionAfterRemoval.json()).code).not.toBe(0)
   }
   finally {
     await request.dispose()
