@@ -5,11 +5,15 @@
   "scripts": {
     "test": "playwright test",
     "test:headed": "playwright test --headed",
+    "test:theme": "playwright test --config=playwright.theme.config.mjs",
+    "test:theme:visual": "playwright test --config=playwright.theme-visual.config.mjs",
     "test:pwa": "playwright test --config=playwright.pwa.config.mjs --fail-on-flaky-tests",
     "provision-member": "node scripts/provision-member.mjs"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.55.0",
-    "better-sqlite3": "^11.7.0"
+    "better-sqlite3": "^11.7.0",
+    "fflate": "^0.8.3"
   }
 }
