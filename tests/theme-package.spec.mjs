@@ -2,6 +2,8 @@ import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from './isolated-fixture.mjs'
 import { authHeaders } from './helpers.mjs'
 import { createThemeArchive } from './theme-package-fixture.mjs'
+import { strToU8, zipSync } from 'fflate'
+import { readFile } from 'node:fs/promises'
 
 const adminCredentials = {
   mail: process.env.YIN_PANEL_TEST_ADMIN_USER || 'admin@yiniot.com',
@@ -154,6 +156,10 @@ test('browser confirms an unsigned package, renders it, and preserves stored pan
       mimeType: 'application/zip',
       buffer: archive,
     })
+    await expect(page.getByText('Preview theme', { exact: true })).toBeVisible()
+    const beforeInstall = await responseData(await request.get('/api/theme/admin/packages', { headers }))
+    expect(beforeInstall.packages.some(item => item.id === uiThemeId)).toBe(false)
+    await page.getByRole('button', { name: 'Install package' }).last().click()
     await expect(page.getByText(new RegExp(uiThemeId.replaceAll('.', '\\.')))).toBeVisible()
     expect(confirmationCount).toBe(1)
 
@@ -190,6 +196,141 @@ test('browser confirms an unsigned package, renders it, and preserves stored pan
   }
 })
 
+test('v2 external web wallpaper can be confirmed as the site default and overridden by a user', async ({ isolated, playwright, page }) => {
+  test.skip(!isolated, 'set YIN_PANEL_TEST_BINARY, YIN_PANEL_TEST_WEB_DIR, and YIN_PANEL_TEST_LANG_DIR')
+  const request = await playwright.request.newContext({ baseURL: isolated.url })
+  try {
+    const admin = await login(request, adminCredentials)
+    const headers = authHeaders(admin)
+    const themeId = uniqueThemeId('external')
+    const poster = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==', 'base64')
+    const wallpaper = { kind: 'externalUrl', source: 'https://wallpaper.example.test/live', poster: 'wallpaper/poster.png' }
+    const archive = createThemeArchive({
+      id: themeId, name: 'External Wallpaper Theme', apiVersion: '2',
+      wallpapers: { light: wallpaper, dark: wallpaper },
+      extraResources: [{ path: 'wallpaper/poster.png', mediaType: 'image/png', content: poster }],
+      designValues: { layoutTemplate: 'split', controlHeight: { value: 44, unit: 'px' } },
+    })
+    await responseData(await install(request, headers, archive))
+    const rejected = await request.post('/api/theme/admin/default', { headers, data: { packageId: themeId } })
+    expect((await rejected.json()).code).not.toBe(0)
+    await responseData(await request.post('/api/theme/admin/default', { headers, data: { packageId: themeId, confirmExternalWallpaper: true } }))
+
+    const regular = await createRegularUser(request, headers, Date.now())
+    const user = await login(request, regular)
+    const userHeaders = authHeaders(user)
+    await page.route('https://wallpaper.example.test/live', route => route.fulfill({
+      status: 200, contentType: 'text/html',
+      body: '<!doctype html><html><body><button>Wallpaper control</button></body></html>',
+    }))
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await loginInBrowser(page, isolated.url, regular)
+    await expect(page.getByTestId('wallpaper-layer')).toBeVisible()
+    await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--yin-controlHeight').trim())).toBe('44px')
+    await expect(page.getByTestId('wallpaper-layer').getByRole('button')).toHaveCount(2)
+    await expect(page.locator('iframe[title="Wallpaper"]')).toHaveAttribute('sandbox', 'allow-scripts')
+    const frame = page.frameLocator('iframe[title="Wallpaper"]')
+    await expect(frame.getByRole('button', { name: 'Wallpaper control' })).toBeVisible()
+    expect(await frame.getByRole('button', { name: 'Wallpaper control' }).evaluate(() => {
+      try { return !!parent.document.body } catch { return false }
+    })).toBe(false)
+
+    await responseData(await request.post('/api/panel/userConfig/setConfig', {
+      headers: userHeaders,
+      data: { panel: { wallpaperMode: 'none', maxWidthUnit: 'px' } },
+    }))
+    await page.reload()
+    await expect(page.getByTestId('wallpaper-layer')).toHaveCount(0)
+    const audit = await responseData(await request.get('/api/theme/admin/audit', { headers }))
+    expect(audit.some(item => item.action === 'default-external' && item.packageId === themeId)).toBe(true)
+  }
+  finally {
+    await request.dispose()
+  }
+})
+
+test('a user can upload an isolated local web wallpaper package', async ({ isolated, playwright, page }) => {
+  test.skip(!isolated, 'set YIN_PANEL_TEST_BINARY, YIN_PANEL_TEST_WEB_DIR, and YIN_PANEL_TEST_LANG_DIR')
+  const request = await playwright.request.newContext({ baseURL: isolated.url })
+  try {
+    const admin = await login(request, adminCredentials)
+    const headers = authHeaders(admin)
+    const regular = await createRegularUser(request, headers, Date.now())
+    const user = await login(request, regular)
+    const userHeaders = authHeaders(user)
+    const poster = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==', 'base64')
+    const bundle = Buffer.from(zipSync({
+      'index.html': strToU8('<!doctype html><html><body><button id="wallpaper">Local wallpaper</button><script>document.getElementById("wallpaper").onclick=()=>document.body.dataset.clicked="yes"</script></body></html>'),
+      'poster.png': poster,
+    }))
+    const uploaded = await responseData(await request.post('/api/theme/wallpaper/web', {
+      headers: userHeaders,
+      multipart: { package: { name: 'local.yin-wallpaper', mimeType: 'application/zip', buffer: bundle } },
+    }))
+    const asset = await request.get(uploaded.source)
+    expect(asset.headers()['content-security-policy']).toContain("connect-src 'none'")
+    await responseData(await request.post('/api/panel/userConfig/setConfig', {
+      headers: userHeaders,
+      data: { panel: { wallpaperMode: 'custom', wallpaperKind: 'webBundle', wallpaperSource: uploaded.source, wallpaperPoster: uploaded.poster, maxWidthUnit: 'px' } },
+    }))
+    await loginInBrowser(page, isolated.url, regular)
+    await expect(page.getByTestId('wallpaper-layer')).toBeVisible()
+    await page.getByRole('button', { name: 'Interact with wallpaper' }).click()
+    const frame = page.frameLocator('iframe[title="Wallpaper"]')
+    await frame.getByRole('button', { name: 'Local wallpaper' }).click()
+    await expect(frame.locator('body')).toHaveAttribute('data-clicked', 'yes')
+    await page.getByRole('button', { name: 'Exit wallpaper interaction' }).click()
+    await expect(page.getByRole('button', { name: 'Interact with wallpaper' })).toBeVisible()
+  }
+  finally {
+    await request.dispose()
+  }
+})
+
+test('a user video wallpaper pauses and follows reduced-motion preference', async ({ isolated, playwright, page }, testInfo) => {
+  test.skip(!isolated, 'set YIN_PANEL_TEST_BINARY, YIN_PANEL_TEST_WEB_DIR, and YIN_PANEL_TEST_LANG_DIR')
+  const request = await playwright.request.newContext({ baseURL: isolated.url })
+  try {
+    const admin = await login(request, adminCredentials)
+    const regular = await createRegularUser(request, authHeaders(admin), Date.now())
+    const user = await login(request, regular)
+    const userHeaders = authHeaders(user)
+    const video = await readFile(new URL('./theme-wallpaper.mp4', import.meta.url))
+    const upload = await responseData(await request.post('/api/file/uploadImg', {
+      headers: userHeaders,
+      multipart: { imgfile: { name: 'wallpaper.mp4', mimeType: 'video/mp4', buffer: video } },
+    }))
+    const videoUrl = upload.imageUrl
+    const ranged = await request.get(videoUrl, { headers: { Range: 'bytes=0-15' } })
+    expect(ranged.status()).toBe(206)
+    await responseData(await request.post('/api/panel/userConfig/setConfig', {
+      headers: userHeaders,
+      data: { panel: { wallpaperMode: 'custom', wallpaperKind: 'video', wallpaperSource: videoUrl, wallpaperPoster: '/assets/bg-forest.webp', maxWidthUnit: 'px' } },
+    }))
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    const videoRequest = page.waitForRequest(request => request.url().endsWith(videoUrl))
+    await loginInBrowser(page, isolated.url, regular)
+    await videoRequest
+    if (testInfo.project.name.includes('webkit')) {
+      await expect(page.getByTestId('wallpaper-layer').locator('img')).toHaveAttribute('src', '/assets/bg-forest.webp')
+      await expect(page.getByRole('button', { name: 'Pause wallpaper' })).toBeVisible()
+    }
+    else {
+      await expect(page.getByTestId('wallpaper-layer').locator('video')).toBeVisible()
+      await page.getByRole('button', { name: 'Pause wallpaper' }).click()
+      await expect(page.getByTestId('wallpaper-layer').locator('video')).toHaveCount(0)
+      await page.getByRole('button', { name: 'Play wallpaper' }).click()
+      await expect(page.getByTestId('wallpaper-layer').locator('video')).toBeVisible()
+    }
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await expect(page.getByTestId('wallpaper-layer').locator('video')).toHaveCount(0)
+    await expect(page.getByTestId('wallpaper-layer').locator('img')).toBeVisible()
+  }
+  finally {
+    await request.dispose()
+  }
+})
+
 test('OS mode, explicit mode, and single-scheme packages select the expected colors', async ({ isolated, playwright, page }) => {
   test.skip(!isolated, 'set YIN_PANEL_TEST_BINARY, YIN_PANEL_TEST_WEB_DIR, and YIN_PANEL_TEST_LANG_DIR')
   const request = await playwright.request.newContext({ baseURL: isolated.url })
@@ -216,7 +357,8 @@ test('OS mode, explicit mode, and single-scheme packages select the expected col
 
     const modeSaved = page.waitForResponse(response => response.url().includes('/api/theme/preference') && response.request().method() === 'POST')
     await selects.nth(1).click()
-    await page.getByText('Light', { exact: true }).last().click()
+    await page.keyboard.press('ArrowUp')
+    await page.keyboard.press('Enter')
     expect((await (await modeSaved).json()).code).toBe(0)
     await page.reload()
     await expect.poll(() => canvasColor(page)).toBe('#eff7ff')
@@ -227,14 +369,19 @@ test('OS mode, explicit mode, and single-scheme packages select the expected col
     const singleId = uniqueThemeId('single')
     const singleArchive = createThemeArchive({ id: singleId, name: 'Single Scheme', schemes: ['light'] })
     expect((await responseData(await install(request, adminHeaders, singleArchive))).id).toBe(singleId)
+    await page.reload()
     await page.getByTestId('system-settings-button').click()
     const singleSelectSaved = page.waitForResponse(response => response.url().includes('/api/theme/preference') && response.request().method() === 'POST')
     await page.locator('.theme-page .n-select').nth(2).click()
-    await page.getByText('Single Scheme', { exact: true }).last().click()
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
     expect((await (await singleSelectSaved).json()).code).toBe(0)
+    mine = await responseData(await request.get('/api/theme/mine', { headers: userHeaders }))
+    expect(mine.preference.packageId).toBe(singleId)
     const darkModeSaved = page.waitForResponse(response => response.url().includes('/api/theme/preference') && response.request().method() === 'POST')
     await page.locator('.theme-page .n-select').nth(1).click()
-    await page.getByText('Dark', { exact: true }).last().click()
+    await page.keyboard.press('ArrowUp')
+    await page.keyboard.press('Enter')
     expect((await (await darkModeSaved).json()).code).toBe(0)
     await page.reload()
     await expect.poll(() => canvasColor(page)).toBe('#eff7ff')
