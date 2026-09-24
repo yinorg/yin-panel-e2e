@@ -17,6 +17,10 @@ const palettes = {
 const slots = Object.keys(palettes.light)
 
 const px = value => ({ value, unit: 'px' })
+const dtcgColor = hex => {
+  const value = hex.replace('#', '')
+  return { colorSpace: 'srgb', components: [0, 2, 4].map(offset => Number.parseInt(value.slice(offset, offset + 2), 16) / 255), alpha: 1 }
+}
 const design = {
   fontBody: ['Inter', 'system-ui'], fontDisplay: ['Inter', 'system-ui'],
   fontBodySize: px(14), fontSmallSize: px(12), fontHeadingSize: px(24),
@@ -59,6 +63,26 @@ export function createThemeArchive({
       $schema: 'https://design-tokens.github.io/community-group/format/2025.10/schema.json',
       color: { $type: 'color', ...colors },
       ...(apiVersion === '2' ? { design: Object.fromEntries(Object.entries({ ...design, ...designValues }).map(([name, value]) => [name, { $type: designTypes[name], $value: value }])) } : {}),
+      ...(apiVersion === '3' ? {
+        primitive: { color: Object.fromEntries(Object.entries(palette).map(([slot, value]) => [slot, { $type: 'color', $value: dtcgColor(value) }])) },
+        semantic: {
+          color: Object.fromEntries(Object.keys(palette).map(slot => [slot, { $type: 'color', $value: `{primitive.color.${slot}}` }])),
+          typography: {
+            body: { $type: 'fontFamily', $value: ['Inter', 'system-ui'] }, display: { $type: 'fontFamily', $value: ['Inter', 'system-ui'] },
+            bodySize: { $type: 'dimension', $value: px(14) }, smallSize: { $type: 'dimension', $value: px(12) }, headingSize: { $type: 'dimension', $value: px(24) },
+            bodyWeight: { $type: 'fontWeight', $value: 400 }, headingWeight: { $type: 'fontWeight', $value: 600 }, bodyLineHeight: { $type: 'number', $value: 1.5 }, headingLineHeight: { $type: 'number', $value: 1.25 },
+          },
+          surface: { $type: 'color', canvas: { $value: '{primitive.color.canvas}' }, panel: { $value: '{primitive.color.surface}' }, raised: { $value: '{primitive.color.surfaceElevated}' } },
+          state: { $type: 'color', focus: { $value: '{primitive.color.focusRing}' }, success: { $value: '{primitive.color.success}' }, warning: { $value: '{primitive.color.warning}' }, danger: { $value: '{primitive.color.danger}' } },
+        },
+        component: {},
+        shape: { $type: 'dimension', control: { $value: px(4) }, card: { $value: px(6) }, dialog: { $value: px(8) }, borderWidth: { $value: px(1) } },
+        spacing: { $type: 'dimension', xs: { $value: px(4) }, sm: { $value: px(8) }, md: { $value: px(12) }, lg: { $value: px(20) }, xl: { $value: px(32) } },
+        density: { scale: { $type: 'string', $value: 'standard' } }, elevation: { card: { $type: 'shadow', $value: design.shadowCard }, popup: { $type: 'shadow', $value: design.shadowPopup } },
+        motion: { hover: { $type: 'duration', $value: { value: 180, unit: 'ms' } }, press: { $type: 'duration', $value: { value: 80, unit: 'ms' } }, enter: { $type: 'duration', $value: { value: 180, unit: 'ms' } }, easing: { $type: 'cubicBezier', $value: [.2, .8, .2, 1] } },
+        background: { overlayOpacity: { $type: 'number', $value: .18 }, texture: { $type: 'string', $value: 'none' }, image: { $type: 'asset', $value: '' } },
+        effect: { glowOpacity: { $type: 'number', $value: .1 }, hoverOpacity: { $type: 'number', $value: .12 }, focusWidth: { $type: 'dimension', $value: px(2) }, textShadow: { $type: 'shadow', $value: design.shadowCard } },
+      } : {}),
     }))]
   }))
   const asset = strToU8(assetContent)
@@ -73,11 +97,13 @@ export function createThemeArchive({
     name,
     packageVersion: version,
     apiVersion,
+    ...(apiVersion === '3' ? { compatibility: { engine: 'yin-theme-engine', minimum: '1.0.0' } } : {}),
     dtcgVersion: invalidDtcgVersion ? '2025.09' : '2025.10',
     schemes,
     documents: Object.fromEntries(schemes.map(scheme => [scheme, `tokens/${scheme}.json`])),
     bindings: {
       ...Object.fromEntries(slots.map(slot => [slot, `/color/${slot}`])),
+      ...(apiVersion === '3' ? Object.fromEntries(slots.map(slot => [slot, `/semantic/color/${slot}`])) : {}),
       ...(apiVersion === '2' ? Object.fromEntries(Object.keys(design).map(slot => [slot, `/design/${slot}`])) : {}),
     },
     resources: resources.map(resource => ({ path: resource.path, mediaType: resource.mediaType, sha256: crypto.createHash('sha256').update(resource.content).digest('hex') })),

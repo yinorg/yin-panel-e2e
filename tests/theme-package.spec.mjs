@@ -210,7 +210,7 @@ test('browser confirms an unsigned package, renders it, and preserves stored pan
       await dialog.accept()
     })
     const uiThemeId = uniqueThemeId('ui')
-    const archive = createThemeArchive({ id: uiThemeId, name: 'Browser Theme' })
+    const archive = createThemeArchive({ id: uiThemeId, name: 'Browser Theme', apiVersion: '2' })
     await page.locator('input[type="file"][accept*=".yin-theme"]').setInputFiles({
       name: 'browser-theme.yin-theme',
       mimeType: 'application/zip',
@@ -256,7 +256,7 @@ test('browser confirms an unsigned package, renders it, and preserves stored pan
   }
 })
 
-test('v2 external web wallpaper can be confirmed as the site default and overridden by a user', async ({ isolated, playwright, page }) => {
+test('v2 external web wallpaper requires admin confirmation and renders its static poster', async ({ isolated, playwright, page }) => {
   test.skip(!isolated, 'set YIN_PANEL_TEST_BINARY, YIN_PANEL_TEST_WEB_DIR, and YIN_PANEL_TEST_LANG_DIR')
   const request = await playwright.request.newContext({ baseURL: isolated.url })
   try {
@@ -279,21 +279,13 @@ test('v2 external web wallpaper can be confirmed as the site default and overrid
     const regular = await createRegularUser(request, headers, Date.now())
     const user = await login(request, regular)
     const userHeaders = authHeaders(user)
-    await page.route('https://wallpaper.example.test/live', route => route.fulfill({
-      status: 200, contentType: 'text/html',
-      body: '<!doctype html><html><body><button>Wallpaper control</button></body></html>',
-    }))
     await page.emulateMedia({ reducedMotion: 'no-preference' })
     await loginInBrowser(page, isolated.url, regular)
     await expect(page.getByTestId('wallpaper-layer')).toBeVisible()
     await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--yin-controlHeight').trim())).toBe('44px')
-    await expect(page.getByTestId('wallpaper-layer').getByRole('button')).toHaveCount(2)
-    await expect(page.locator('iframe[title="Wallpaper"]')).toHaveAttribute('sandbox', 'allow-scripts')
-    const frame = page.frameLocator('iframe[title="Wallpaper"]')
-    await expect(frame.getByRole('button', { name: 'Wallpaper control' })).toBeVisible()
-    expect(await frame.getByRole('button', { name: 'Wallpaper control' }).evaluate(() => {
-      try { return !!parent.document.body } catch { return false }
-    })).toBe(false)
+    await expect(page.getByTestId('wallpaper-layer').getByRole('button')).toHaveCount(0)
+    await expect(page.locator('iframe[title="Wallpaper"]')).toHaveCount(0)
+    await expect(page.getByTestId('wallpaper-layer').locator('img')).toHaveAttribute('src', /poster\.png/)
 
     await responseData(await request.post('/api/panel/userConfig/setConfig', {
       headers: userHeaders,
@@ -320,7 +312,7 @@ test('a user can upload an isolated local web wallpaper package', async ({ isola
     const userHeaders = authHeaders(user)
     const poster = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==', 'base64')
     const bundle = Buffer.from(zipSync({
-      'index.html': strToU8('<!doctype html><html><body><button id="wallpaper">Local wallpaper</button><script>document.getElementById("wallpaper").onclick=()=>document.body.dataset.clicked="yes"</script></body></html>'),
+      'index.html': strToU8('<!doctype html><html><body><button onclick="this.textContent=\'Clicked\'">Local wallpaper</button></body></html>'),
       'poster.png': poster,
     }))
     const uploaded = await responseData(await request.post('/api/theme/wallpaper/web', {
@@ -338,7 +330,7 @@ test('a user can upload an isolated local web wallpaper package', async ({ isola
     await page.getByRole('button', { name: 'Interact with wallpaper' }).click()
     const frame = page.frameLocator('iframe[title="Wallpaper"]')
     await frame.getByRole('button', { name: 'Local wallpaper' }).click()
-    await expect(frame.locator('body')).toHaveAttribute('data-clicked', 'yes')
+    await expect(frame.getByRole('button', { name: 'Clicked' })).toBeVisible()
     await page.getByRole('button', { name: 'Exit wallpaper interaction' }).click()
     await expect(page.getByRole('button', { name: 'Interact with wallpaper' })).toBeVisible()
   }

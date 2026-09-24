@@ -8,7 +8,7 @@ try { process.loadEnvFile(envFile) } catch (error) {
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: 'theme-package.spec.mjs',
+  testMatch: ['directory-layout.spec.mjs', 'theme-architecture.spec.mjs', 'theme-package-v2.spec.mjs'],
   timeout: 120000,
   fullyParallel: false,
   workers: 1,
