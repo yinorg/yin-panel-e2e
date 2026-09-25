@@ -34,6 +34,21 @@ test('login and theme settings match approved visual baselines', async ({ isolat
     await expect(page).toHaveURL(`${isolated.url}/`)
     await openStyleSettings(page)
     await expect(page.getByText('Theme library', { exact: true })).toBeVisible()
+    const selects = page.locator('.n-base-selection')
+    await expect(selects.first()).toBeVisible()
+    await selects.first().click()
+    const selectMenu = page.locator('.n-base-select-menu:visible')
+    await expect(selectMenu).toBeVisible()
+    await expect(selectMenu.locator('.n-base-select-option').first()).toBeVisible()
+    const menuStyle = await selectMenu.evaluate(element => {
+      const style = getComputedStyle(element)
+      return { display: style.display, visibility: style.visibility, opacity: style.opacity, backgroundColor: style.backgroundColor }
+    })
+    expect(menuStyle.display).not.toBe('none')
+    expect(menuStyle.visibility).toBe('visible')
+    expect(Number(menuStyle.opacity)).toBeGreaterThan(0)
+    expect(menuStyle.backgroundColor).not.toBe('rgba(0, 0, 0, 0)')
+    await page.keyboard.press('Escape')
     await page.getByText(/welcome back/i).waitFor({ state: 'hidden' })
     await expect(page).toHaveScreenshot(`theme-settings-${testInfo.project.name}.png`, {
       animations: 'disabled',

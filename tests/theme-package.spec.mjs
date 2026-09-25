@@ -26,7 +26,7 @@ async function login(request, credentials) {
 }
 
 async function install(request, headers, archive, confirmUnverified = true) {
-  return request.post('/api/theme/admin/install', {
+  return request.post('/api/theme/v2/admin/install', {
     headers,
     multipart: {
       package: { name: 'fixture.yin-theme', mimeType: 'application/zip', buffer: archive },
@@ -69,7 +69,7 @@ test('unsigned install confirmation, authorization, preferences, audit, and unin
   test.skip(!isolated, 'set YIN_PANEL_TEST_BINARY, YIN_PANEL_TEST_WEB_DIR, and YIN_PANEL_TEST_LANG_DIR')
   const request = await playwright.request.newContext({ baseURL: isolated.url })
   try {
-    const publicTheme = await responseData(await request.get('/api/theme/current'))
+    const publicTheme = await responseData(await request.get('/api/theme/v2/current'))
     expect(publicTheme.manifest.id).toBe('org.yin.default')
     expect(publicTheme.manifest.dtcgVersion).toBe('2025.10')
 
@@ -83,7 +83,7 @@ test('unsigned install confirmation, authorization, preferences, audit, and unin
     const accepted = await install(request, adminHeaders, archive, true)
     expect((await responseData(accepted)).verified).toBe(false)
 
-    const listed = await responseData(await request.get('/api/theme/admin/packages', { headers: adminHeaders }))
+    const listed = await responseData(await request.get('/api/theme/v2/admin/packages', { headers: adminHeaders }))
     expect(listed.packages.some(item => item.id === themeId && item.verified === false)).toBe(true)
 
     const regular = await createRegularUser(request, adminHeaders, Date.now())
@@ -91,35 +91,35 @@ test('unsigned install confirmation, authorization, preferences, audit, and unin
     const userHeaders = authHeaders(user)
     expect(user.role).toBe(2)
     for (const [method, url, data] of [
-      ['get', '/api/theme/admin/packages'],
-      ['post', '/api/theme/admin/default', { packageId: themeId }],
-      ['delete', `/api/theme/admin/packages/${themeId}`],
+      ['get', '/api/theme/v2/admin/packages'],
+      ['post', '/api/theme/v2/admin/default', { packageId: themeId }],
+      ['delete', `/api/theme/v2/admin/packages/${themeId}`],
     ]) {
       const response = await request[method](url, { headers: userHeaders, data })
       expect((await response.json()).code).not.toBe(0)
     }
 
-    expect((await request.get('/api/theme/admin/packages').then(response => response.json())).code).not.toBe(0)
-    await responseData(await request.post('/api/theme/preference', {
+    expect((await request.get('/api/theme/v2/admin/packages').then(response => response.json())).code).not.toBe(0)
+    await responseData(await request.post('/api/theme/v2/preference', {
       headers: userHeaders,
       data: { packageId: themeId, mode: 'dark' },
     }))
 
-    await responseData(await request.post('/api/theme/admin/default', {
+    await responseData(await request.post('/api/theme/v2/admin/default', {
       headers: adminHeaders,
       data: { packageId: themeId },
     }))
-    let mine = await responseData(await request.get('/api/theme/mine', { headers: userHeaders }))
+    let mine = await responseData(await request.get('/api/theme/v2/mine', { headers: userHeaders }))
     expect(mine.package.manifest.id).toBe(themeId)
     expect(mine.preference.mode).toBe('dark')
     expect(mine.preference.packageId).toBe(themeId)
 
-    const audit = await responseData(await request.get('/api/theme/admin/audit', { headers: adminHeaders }))
+    const audit = await responseData(await request.get('/api/theme/v2/admin/audit', { headers: adminHeaders }))
     expect(audit.map(row => row.action)).toEqual(expect.arrayContaining(['install', 'default', 'select']))
 
-    await responseData(await request.delete(`/api/theme/admin/packages/${themeId}`, { headers: adminHeaders }))
-    const current = await responseData(await request.get('/api/theme/current'))
-    mine = await responseData(await request.get('/api/theme/mine', { headers: userHeaders }))
+    await responseData(await request.delete(`/api/theme/v2/admin/packages/${themeId}`, { headers: adminHeaders }))
+    const current = await responseData(await request.get('/api/theme/v2/current'))
+    mine = await responseData(await request.get('/api/theme/v2/mine', { headers: userHeaders }))
     expect(current.manifest.id).toBe('org.yin.default')
     expect(mine.package.manifest.id).toBe('org.yin.default')
     expect(mine.preference.packageId).toBe('org.yin.default')
@@ -136,9 +136,9 @@ test('built-in Yin Mist is selectable, renders both schemes, and stays removed a
   try {
     const admin = await login(request, adminCredentials)
     const adminHeaders = authHeaders(admin)
-    const publicPackages = await responseData(await request.get('/api/theme/packages'))
+    const publicPackages = await responseData(await request.get('/api/theme/v2/packages'))
     expect(publicPackages.some(item => item.id === 'org.yin.mist' && item.name === 'Yin Mist')).toBe(true)
-    const adminPackages = await responseData(await request.get('/api/theme/admin/packages', { headers: adminHeaders }))
+    const adminPackages = await responseData(await request.get('/api/theme/v2/admin/packages', { headers: adminHeaders }))
     expect(adminPackages.defaultPackage).toBe('org.yin.default')
 
     const regular = await createRegularUser(request, adminHeaders, Date.now())
@@ -149,36 +149,36 @@ test('built-in Yin Mist is selectable, renders both schemes, and stays removed a
     await page.getByTestId('system-settings-button').click()
     const packageSelect = page.locator('.theme-page .n-select').nth(2)
     await expect(packageSelect).toBeVisible()
-    const selectionSaved = page.waitForResponse(response => response.url().includes('/api/theme/preference') && response.request().method() === 'POST')
+    const selectionSaved = page.waitForResponse(response => response.url().includes('/api/theme/v2/preference') && response.request().method() === 'POST')
     await packageSelect.click()
     await page.getByText('Yin Mist', { exact: true }).last().click()
     expect((await (await selectionSaved).json()).code).toBe(0)
     await page.reload()
     await expect.poll(() => canvasColor(page)).toBe('#f4f7f6')
 
-    await responseData(await request.post('/api/theme/preference', {
+    await responseData(await request.post('/api/theme/v2/preference', {
       headers: userHeaders,
       data: { packageId: 'org.yin.mist', mode: 'dark' },
     }))
     await page.reload()
     await expect.poll(() => canvasColor(page)).toBe('#151d1c')
 
-    await responseData(await request.post('/api/theme/admin/default', {
+    await responseData(await request.post('/api/theme/v2/admin/default', {
       headers: adminHeaders,
       data: { packageId: 'org.yin.mist' },
     }))
-    await responseData(await request.delete('/api/theme/admin/packages/org.yin.mist', { headers: adminHeaders }))
-    const current = await responseData(await request.get('/api/theme/current'))
-    const mine = await responseData(await request.get('/api/theme/mine', { headers: userHeaders }))
+    await responseData(await request.delete('/api/theme/v2/admin/packages/org.yin.mist', { headers: adminHeaders }))
+    const current = await responseData(await request.get('/api/theme/v2/current'))
+    const mine = await responseData(await request.get('/api/theme/v2/mine', { headers: userHeaders }))
     expect(current.manifest.id).toBe('org.yin.default')
     expect(mine.package.manifest.id).toBe('org.yin.default')
     expect(mine.preference.packageId).toBe('org.yin.default')
     expect(mine.preference.mode).toBe('dark')
 
     await restartIsolatedService(isolated)
-    const packagesAfterRestart = await responseData(await request.get('/api/theme/packages'))
+    const packagesAfterRestart = await responseData(await request.get('/api/theme/v2/packages'))
     expect(packagesAfterRestart.some(item => item.id === 'org.yin.mist')).toBe(false)
-    const selectionAfterRemoval = await request.post('/api/theme/preference', {
+    const selectionAfterRemoval = await request.post('/api/theme/v2/preference', {
       headers: userHeaders,
       data: { packageId: 'org.yin.mist', mode: 'light' },
     })
@@ -217,13 +217,13 @@ test('browser confirms an unsigned package, renders it, and preserves stored pan
       buffer: archive,
     })
     await expect(page.getByText('Preview theme', { exact: true })).toBeVisible()
-    const beforeInstall = await responseData(await request.get('/api/theme/admin/packages', { headers }))
+    const beforeInstall = await responseData(await request.get('/api/theme/v2/admin/packages', { headers }))
     expect(beforeInstall.packages.some(item => item.id === uiThemeId)).toBe(false)
     await page.getByRole('button', { name: 'Install package' }).last().click()
     await expect(page.getByText(new RegExp(uiThemeId.replaceAll('.', '\\.')))).toBeVisible()
     expect(confirmationCount).toBe(1)
 
-    await responseData(await request.post('/api/theme/admin/default', {
+    await responseData(await request.post('/api/theme/v2/admin/default', {
       headers,
       data: { packageId: uiThemeId },
     }))
@@ -272,9 +272,9 @@ test('v2 external web wallpaper requires admin confirmation and renders its stat
       designValues: { layoutTemplate: 'split', controlHeight: { value: 44, unit: 'px' } },
     })
     await responseData(await install(request, headers, archive))
-    const rejected = await request.post('/api/theme/admin/default', { headers, data: { packageId: themeId } })
+    const rejected = await request.post('/api/theme/v2/admin/default', { headers, data: { packageId: themeId } })
     expect((await rejected.json()).code).not.toBe(0)
-    await responseData(await request.post('/api/theme/admin/default', { headers, data: { packageId: themeId, confirmExternalWallpaper: true } }))
+    await responseData(await request.post('/api/theme/v2/admin/default', { headers, data: { packageId: themeId, confirmExternalWallpaper: true } }))
 
     const regular = await createRegularUser(request, headers, Date.now())
     const user = await login(request, regular)
@@ -293,7 +293,7 @@ test('v2 external web wallpaper requires admin confirmation and renders its stat
     }))
     await page.reload()
     await expect(page.getByTestId('wallpaper-layer')).toHaveCount(0)
-    const audit = await responseData(await request.get('/api/theme/admin/audit', { headers }))
+    const audit = await responseData(await request.get('/api/theme/v2/admin/audit', { headers }))
     expect(audit.some(item => item.action === 'default-external' && item.packageId === themeId)).toBe(true)
   }
   finally {
@@ -315,7 +315,7 @@ test('a user can upload an isolated local web wallpaper package', async ({ isola
       'index.html': strToU8('<!doctype html><html><body><button onclick="this.textContent=\'Clicked\'">Local wallpaper</button></body></html>'),
       'poster.png': poster,
     }))
-    const uploaded = await responseData(await request.post('/api/theme/wallpaper/web', {
+    const uploaded = await responseData(await request.post('/api/theme/v2/wallpaper/web', {
       headers: userHeaders,
       multipart: { package: { name: 'local.yin-wallpaper', mimeType: 'application/zip', buffer: bundle } },
     }))
@@ -401,20 +401,20 @@ test('OS mode, explicit mode, and single-scheme packages select the expected col
     await page.getByTestId('system-settings-button').click()
     const selects = page.locator('.theme-page .n-select')
     await expect(selects).toHaveCount(3)
-    const packageSaved = page.waitForResponse(response => response.url().includes('/api/theme/preference') && response.request().method() === 'POST')
+    const packageSaved = page.waitForResponse(response => response.url().includes('/api/theme/v2/preference') && response.request().method() === 'POST')
     await selects.nth(2).click()
     await page.getByText('Mode Theme', { exact: true }).last().click()
     expect((await (await packageSaved).json()).code).toBe(0)
     await expect.poll(() => canvasColor(page)).toBe('#171d20')
 
-    const modeSaved = page.waitForResponse(response => response.url().includes('/api/theme/preference') && response.request().method() === 'POST')
+    const modeSaved = page.waitForResponse(response => response.url().includes('/api/theme/v2/preference') && response.request().method() === 'POST')
     await selects.nth(1).click()
     await page.keyboard.press('ArrowUp')
     await page.keyboard.press('Enter')
     expect((await (await modeSaved).json()).code).toBe(0)
     await page.reload()
     await expect.poll(() => canvasColor(page)).toBe('#eff7ff')
-    let mine = await responseData(await request.get('/api/theme/mine', { headers: userHeaders }))
+    let mine = await responseData(await request.get('/api/theme/v2/mine', { headers: userHeaders }))
     expect(mine.preference.packageId).toBe(themeId)
     expect(mine.preference.mode).toBe('light')
 
@@ -423,21 +423,21 @@ test('OS mode, explicit mode, and single-scheme packages select the expected col
     expect((await responseData(await install(request, adminHeaders, singleArchive))).id).toBe(singleId)
     await page.reload()
     await page.getByTestId('system-settings-button').click()
-    const singleSelectSaved = page.waitForResponse(response => response.url().includes('/api/theme/preference') && response.request().method() === 'POST')
+    const singleSelectSaved = page.waitForResponse(response => response.url().includes('/api/theme/v2/preference') && response.request().method() === 'POST')
     await page.locator('.theme-page .n-select').nth(2).click()
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Enter')
     expect((await (await singleSelectSaved).json()).code).toBe(0)
-    mine = await responseData(await request.get('/api/theme/mine', { headers: userHeaders }))
+    mine = await responseData(await request.get('/api/theme/v2/mine', { headers: userHeaders }))
     expect(mine.preference.packageId).toBe(singleId)
-    const darkModeSaved = page.waitForResponse(response => response.url().includes('/api/theme/preference') && response.request().method() === 'POST')
+    const darkModeSaved = page.waitForResponse(response => response.url().includes('/api/theme/v2/preference') && response.request().method() === 'POST')
     await page.locator('.theme-page .n-select').nth(1).click()
     await page.keyboard.press('ArrowUp')
     await page.keyboard.press('Enter')
     expect((await (await darkModeSaved).json()).code).toBe(0)
     await page.reload()
     await expect.poll(() => canvasColor(page)).toBe('#eff7ff')
-    mine = await responseData(await request.get('/api/theme/mine', { headers: userHeaders }))
+    mine = await responseData(await request.get('/api/theme/v2/mine', { headers: userHeaders }))
     expect(mine.preference.mode).toBe('dark')
     expect(mine.preference.packageId).toBe(singleId)
   }
@@ -457,8 +457,8 @@ test('upgrade changes the immutable asset URL and serves the new asset bytes', a
     const newBytes = 'immutable-asset-v2'
     const firstArchive = createThemeArchive({ id: themeId, name: 'Upgrade Theme', assetContent: oldBytes })
     expect((await responseData(await install(request, headers, firstArchive))).id).toBe(themeId)
-    await responseData(await request.post('/api/theme/admin/default', { headers, data: { packageId: themeId } }))
-    const before = await responseData(await request.get('/api/theme/current'))
+    await responseData(await request.post('/api/theme/v2/admin/default', { headers, data: { packageId: themeId } }))
+    const before = await responseData(await request.get('/api/theme/v2/current'))
     const oldUrl = before.manifest.resources[0].url
     await page.goto(`${isolated.url}/`)
     const oldContent = await page.evaluate(async url => await (await fetch(url)).text(), new URL(oldUrl, isolated.url).href)
@@ -472,7 +472,7 @@ test('upgrade changes the immutable asset URL and serves the new asset bytes', a
       colorVariant: 'blue',
     })
     expect((await responseData(await install(request, headers, nextArchive))).id).toBe(themeId)
-    const after = await responseData(await request.get('/api/theme/current'))
+    const after = await responseData(await request.get('/api/theme/v2/current'))
     const newUrl = after.manifest.resources[0].url
     expect(newUrl).not.toBe(oldUrl)
     expect(after.manifest.packageVersion).toBe('1.0.1')
@@ -490,16 +490,16 @@ test('invalid packages are rejected without installing partial state', async ({ 
   try {
     const admin = await login(request, adminCredentials)
     const headers = authHeaders(admin)
-    const currentBefore = await responseData(await request.get('/api/theme/current'))
+    const currentBefore = await responseData(await request.get('/api/theme/v2/current'))
     const invalidId = uniqueThemeId('invalid')
     const invalid = await install(request, headers, createThemeArchive({
       id: invalidId,
       invalidDtcgVersion: true,
     }))
     expect((await invalid.json()).code).not.toBe(0)
-    const list = await responseData(await request.get('/api/theme/admin/packages', { headers }))
+    const list = await responseData(await request.get('/api/theme/v2/admin/packages', { headers }))
     expect(list.packages.some(item => item.id === invalidId)).toBe(false)
-    const defaultResponse = await responseData(await request.get('/api/theme/current'))
+    const defaultResponse = await responseData(await request.get('/api/theme/v2/current'))
     expect(defaultResponse.manifest.id).toBe(currentBefore.manifest.id)
   }
   finally {

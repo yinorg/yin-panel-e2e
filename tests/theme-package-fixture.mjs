@@ -60,7 +60,7 @@ export function createThemeArchive({
     if (colorVariant === 'blue' && scheme === 'light') palette.primary = '#064b79'
     const colors = Object.fromEntries(Object.entries(palette).map(([slot, value]) => [slot, { $value: value }]))
     return [scheme, strToU8(JSON.stringify({
-      $schema: 'https://design-tokens.github.io/community-group/format/2025.10/schema.json',
+      $schema: 'https://www.designtokens.org/schemas/2025.10/format.json',
       color: { $type: 'color', ...colors },
       ...(apiVersion === '2' ? { design: Object.fromEntries(Object.entries({ ...design, ...designValues }).map(([name, value]) => [name, { $type: designTypes[name], $value: value }])) } : {}),
       ...(apiVersion === '3' ? {

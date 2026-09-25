@@ -23,10 +23,10 @@ test('official DTCG themes change the visual system without changing panel layou
     const admin = await login(request, adminCredentials)
     const headers = authHeaders(admin)
     for (const id of ['org.yin.glass', 'org.yin.minimal', 'org.yin.cyber']) {
-      await responseData(await request.post('/api/theme/admin/default', { headers, data: { packageId: id } }))
-      await responseData(await request.post('/api/theme/admin/default', { headers, data: { packageId: 'org.yin.default' } }))
+      await responseData(await request.post('/api/theme/v2/admin/default', { headers, data: { packageId: id } }))
+      await responseData(await request.post('/api/theme/v2/admin/default', { headers, data: { packageId: 'org.yin.default' } }))
     }
-    const themes = await responseData(await request.get('/api/theme/packages'))
+    const themes = await responseData(await request.get('/api/theme/v2/packages'))
     for (const id of ['org.yin.default', 'org.yin.glass', 'org.yin.minimal', 'org.yin.cyber'])
       expect(themes.some(theme => theme.id === id), `${id} is installed`).toBe(true)
 
@@ -55,7 +55,7 @@ test('official DTCG themes change the visual system without changing panel layou
     }))
     const appearances = new Map()
     for (const id of ['org.yin.default', 'org.yin.glass', 'org.yin.minimal', 'org.yin.cyber']) {
-      await responseData(await request.post('/api/theme/preference', { headers, data: { packageId: id, mode: 'light' } }))
+      await responseData(await request.post('/api/theme/v2/preference', { headers, data: { packageId: id, mode: 'light' } }))
       await page.reload()
       const expected = id === 'org.yin.default'
         ? { surface: 'solid' }
@@ -77,7 +77,7 @@ test('official DTCG themes change the visual system without changing panel layou
     expect(appearances.get('org.yin.cyber').font).toContain('monospace')
 
     await page.emulateMedia({ colorScheme: 'dark' })
-    await responseData(await request.post('/api/theme/preference', { headers, data: { packageId: 'org.yin.glass', mode: 'auto' } }))
+    await responseData(await request.post('/api/theme/v2/preference', { headers, data: { packageId: 'org.yin.glass', mode: 'auto' } }))
     await page.reload()
     await expect.poll(() => page.locator('html').evaluate(element => element.classList.contains('dark'))).toBe(true)
 

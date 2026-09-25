@@ -1,0 +1,7 @@
+[
+  "v2 packages preview, install, activate, serve immutable assets, and roll back on removal",
+  "sandbox home theme mounts only with a user grant and falls back after grant revocation",
+  "trusted home theme requires administrator and user approval and exits after administrator revocation",
+  "directory layout never renders only its background when bookmark data exists",
+  "all built-in theme home views render real items and expose immutable package assets"
+]

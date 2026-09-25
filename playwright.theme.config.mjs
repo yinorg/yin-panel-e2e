@@ -5,15 +5,19 @@ const envFile = process.env.YIN_PANEL_ENV_FILE || path.resolve('.env.local')
 try { process.loadEnvFile(envFile) } catch (error) {
   if (error.code !== 'ENOENT') throw error
 }
+for (const name of ['NO_PROXY', 'no_proxy']) {
+  process.env[name] = [...new Set(`${process.env[name] || ''},localhost,127.0.0.1,::1`.split(',').filter(Boolean))].join(',')
+}
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: ['directory-layout.spec.mjs', 'theme-architecture.spec.mjs', 'theme-package-v2.spec.mjs'],
+  forbidOnly: true,
+  testMatch: ['directory-layout.spec.mjs', 'theme-architecture.spec.mjs', 'theme-package-v2.spec.mjs', 'builtin-theme-home.spec.mjs', 'theme-author-preview.spec.mjs', 'item-editor.spec.mjs'],
   timeout: 120000,
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  reporter: [['list'], ['html', { outputFolder: 'playwright-report/theme', open: 'never' }]],
+  reporter: [['list'], ['html', { outputFolder: 'playwright-report/theme', open: 'never' }], ['./tests/strict-gate-reporter.mjs']],
   use: {
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
