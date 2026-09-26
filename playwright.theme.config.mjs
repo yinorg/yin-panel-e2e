@@ -12,7 +12,7 @@ for (const name of ['NO_PROXY', 'no_proxy']) {
 export default defineConfig({
   testDir: './tests',
   forbidOnly: true,
-  testMatch: ['directory-layout.spec.mjs', 'theme-architecture.spec.mjs', 'theme-package-v2.spec.mjs', 'builtin-theme-home.spec.mjs', 'theme-author-preview.spec.mjs', 'item-editor.spec.mjs'],
+  testMatch: ['directory-layout.spec.mjs', 'theme-architecture.spec.mjs', 'theme-package-v2.spec.mjs', 'builtin-theme-home.spec.mjs', 'theme-author-preview.spec.mjs', 'item-editor.spec.mjs', 'default-theme-interaction.spec.mjs'],
   timeout: 120000,
   fullyParallel: false,
   workers: 1,
