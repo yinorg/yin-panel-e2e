@@ -1,0 +1,80 @@
+{
+  "commit": "6c69d8414692cc41caff93489a0f85c01481d38e",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "colorScheme": "light",
+  "clock": "2026-01-01T12:00:00.000Z",
+  "wallpaper": "/assets/bg-forest.webp",
+  "fixture": {
+    "space": "Default test space",
+    "group": "APP",
+    "items": [
+      {
+        "title": "P0 Text Icon",
+        "type": 1
+      },
+      {
+        "title": "P0 Image Icon",
+        "type": 2
+      },
+      {
+        "title": "P0 Vector Icon",
+        "type": 3
+      }
+    ]
+  },
+  "geometry": {
+    ".space-status-bar": {
+      "x": 646,
+      "y": 14,
+      "width": 148,
+      "height": 42,
+      "visible": true
+    },
+    ".clock": {
+      "x": 817.375,
+      "y": 82.796875,
+      "width": 120.0625,
+      "height": 58.390625,
+      "visible": true
+    },
+    ".search-box": {
+      "x": 342.40625,
+      "y": 162,
+      "width": 755.1875,
+      "height": 46,
+      "visible": true
+    },
+    ".system-monitor-layer": {
+      "x": 135,
+      "y": 208,
+      "width": 1170,
+      "height": 192.390625,
+      "visible": true
+    },
+    "[data-item-group]": {
+      "x": 135,
+      "y": 448,
+      "width": 1170,
+      "height": 164.78125,
+      "visible": true
+    },
+    ".app-icon-small": {
+      "x": 135,
+      "y": 496,
+      "width": 81,
+      "height": 94.390625,
+      "visible": true
+    },
+    ".app-icon-info": null,
+    ".footer": {
+      "x": 130,
+      "y": 632.78125,
+      "width": 1180,
+      "height": 22.390625,
+      "visible": true
+    }
+  }
+}

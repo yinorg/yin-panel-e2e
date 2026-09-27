@@ -163,7 +163,7 @@ test('v2 packages preview, install, activate, serve immutable assets, and roll b
   }
 })
 
-test('sandbox home theme mounts only with a user grant and falls back after grant revocation', async ({ isolated, playwright, page }) => {
+test('sandbox home theme mounts only with a user grant and falls back after grant revocation', async ({ isolated, playwright, page }, testInfo) => {
   test.skip(!isolated, 'set YIN_PANEL_TEST_BINARY, YIN_PANEL_TEST_WEB_DIR, and YIN_PANEL_TEST_LANG_DIR')
   const request = await playwright.request.newContext({ baseURL: isolated.url })
   const themeId = `community.e2e.runtime-${Date.now().toString(36)}`
@@ -189,6 +189,14 @@ test('sandbox home theme mounts only with a user grant and falls back after gran
     await expect(page.frameLocator('[data-testid="theme-home-frame"]').locator('[data-theme-region="footer"] [data-testid="theme-region-footer"]')).toBeVisible()
     await expect(page.frameLocator('[data-testid="theme-home-frame"]').locator('[data-theme-component="item-card"] [data-testid="theme-component-card"]')).toBeVisible()
     await expect(runtimeView).toHaveAttribute('data-isolated', 'true')
+    if (testInfo.project.name === 'pixel-7-chromium' || testInfo.project.name === 'iphone-15-webkit') {
+      await expect(frame).toBeVisible()
+      await expect(frame).toHaveAttribute('sandbox', 'allow-scripts')
+      const refreshControl = runtimeView.getByTestId('theme-refresh-data')
+      await refreshControl.focus()
+      await expect(refreshControl).toBeFocused()
+      expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(false)
+    }
     const isolation = await runtimeView.evaluate((surface) => {
       const frameWindow = surface.ownerDocument.defaultView
       const accessDenied = (read) => {
@@ -227,6 +235,11 @@ test('sandbox home theme mounts only with a user grant and falls back after gran
     await expect(page.locator('[data-testid="theme-home-frame"]')).toHaveCount(0)
     await expect(page.locator('[data-testid="theme-runtime-consent"]')).toBeVisible()
     await expect(page.locator('.home-content')).toBeVisible()
+    if (testInfo.project.name === 'pixel-7-chromium' || testInfo.project.name === 'iphone-15-webkit') {
+      await page.emulateMedia({ reducedMotion: 'reduce' })
+      await expect.poll(() => page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true)
+      await expect(page.locator('[data-testid="theme-home-frame"]')).toHaveCount(0)
+    }
   }
   finally {
     if (installed) {

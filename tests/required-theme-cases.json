@@ -3,6 +3,10 @@
   "sandbox home theme mounts only with a user grant and falls back after grant revocation",
   "trusted home theme requires administrator and user approval and exits after administrator revocation",
   "directory layout never renders only its background when bookmark data exists",
+  "standard default Yin theme restores legacy presentation features inside the granted sandbox iframe",
+  "default Yin standard layout runs the granted item and group mutation workflow",
+  "default Yin directory layout runs the granted item and group mutation workflow",
+  "default Yin mobile home exposes loading, empty, error, offline, keyboard focus, and reduced-motion states",
   "all built-in theme home views render real items and expose immutable package assets",
   "default theme switches Yin/Yang and keeps items clickable with system monitor enabled"
 ]
