@@ -4,3 +4,4 @@ test-results/
 playwright-report/
 tests/theme-visual.spec.mjs-snapshots/
 tests/theme-package.spec.mjs-snapshots/
+.codex/
