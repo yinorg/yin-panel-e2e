@@ -89,6 +89,11 @@ export async function deleteSpace(request, spaceId, headers) {
   await request.post(`/api/spaces/${spaceId}/clear`, { headers }).catch(() => {})
 }
 
+// Spaces are owned rows, so removal goes through the owner-only delete route.
+export async function deleteSpacePermanently(request, spaceId, headers) {
+  return json(request, 'post', `/api/spaces/${spaceId}/delete`, { headers })
+}
+
 export function sha256File(buffer, ext = '.png') {
   return `${crypto.createHash('sha256').update(buffer).digest('hex')}${ext}`
 }

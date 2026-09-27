@@ -51,14 +51,39 @@ async function compareLegacyBaseline(page, testInfo, mode, width, height) {
     .toBeLessThanOrEqual(0.06)
 }
 
-async function expectLegacyGeometry(locator, expected, label) {
+async function expectLegacyGeometry(locator, expected, label, options = {}) {
   await expect(locator, `${label} must exist in the real Yin theme`).toBeVisible()
   const box = await locator.boundingBox()
   expect(box, `${label} must have a measurable rectangle`).not.toBeNull()
-  expect(Math.abs(box.x - expected.x), `${label} x offset`).toBeLessThanOrEqual(8)
+  if (!options.skipX)
+    expect(Math.abs(box.x - expected.x), `${label} x offset`).toBeLessThanOrEqual(8)
   expect(Math.abs(box.y - expected.y), `${label} y offset`).toBeLessThanOrEqual(8)
   expect(Math.abs(box.width - expected.width) / expected.width, `${label} width`).toBeLessThanOrEqual(0.05)
   expect(Math.abs(box.height - expected.height) / expected.height, `${label} height actual=${box.height} expected=${expected.height}`).toBeLessThanOrEqual(0.05)
+}
+
+/**
+ * The masthead is a centred flex box holding `logo | clock`, so the clock's
+ * absolute x is a *derived* value: it moves with the rendered width of the
+ * logo text, which differs per font stack and per rendering engine. Comparing
+ * it to a legacy absolute x therefore measures the font, not the layout.
+ * Assert the engine-independent invariant instead — the identity block is
+ * centred in the masthead and the clock stays clear of the logo.
+ */
+async function expectIdentityBlockCentered(themed, label) {
+  const [masthead, identity, clock, logo] = await Promise.all([
+    themed.locator('.yin-masthead').boundingBox(),
+    themed.locator('.yin-identity').boundingBox(),
+    themed.locator('.yin-clock').boundingBox(),
+    themed.locator('.yin-logo').boundingBox(),
+  ])
+  for (const [name, box] of Object.entries({ masthead, identity, clock, logo }))
+    expect(box, `${label} ${name} must have a measurable rectangle`).not.toBeNull()
+  const mastheadCenter = masthead.x + masthead.width / 2
+  const identityCenter = identity.x + identity.width / 2
+  expect(Math.abs(identityCenter - mastheadCenter), `${label} identity block must stay horizontally centred in the masthead`).toBeLessThanOrEqual(1)
+  expect(clock.x, `${label} clock must sit to the right of the logo without overlapping it`).toBeGreaterThanOrEqual(logo.x + logo.width - 1)
+  expect(clock.x + clock.width, `${label} clock must stay inside the masthead`).toBeLessThanOrEqual(masthead.x + masthead.width + 1)
 }
 
 async function expectHitTestTarget(locator, label) {
@@ -264,27 +289,59 @@ async function runYinMutationWorkflow({ isolated, page, playwright }, layout) {
   }
 }
 
-async function assertNoMonitorItemOverlap(page, themed) {
+// The system monitor is an absolutely positioned band inside the scrolling
+// theme shell, mirroring the Core home: it sits right below the search box and
+// travels with the page instead of floating over it. At rest the collection is
+// offset below the band, so nothing hides behind it.
+async function assertMonitorScrollsWithContentWithoutOverlap(page, themed) {
   const monitor = page.locator('[data-testid="theme-runtime-monitor"]')
   await expect(monitor).toBeVisible()
-  const monitorBox = await monitor.boundingBox()
-  expect(monitorBox?.width).toBeGreaterThan(0)
-  expect(monitorBox?.height).toBeGreaterThan(0)
+  const shell = page.locator('.theme-runtime-shell')
+  await expect(shell).toBeVisible()
+
+  const atRest = await monitor.boundingBox()
+  expect(atRest?.width, 'the monitor must be measurable').toBeGreaterThan(0)
+  expect(atRest?.height, 'the monitor must be measurable').toBeGreaterThan(0)
 
   const items = themed.locator('.yin-item')
   const itemCount = await items.count()
   expect(itemCount, 'the sandbox must render real Item buttons').toBeGreaterThan(0)
   for (let index = 0; index < itemCount; index++) {
-    const item = items.nth(index)
-    await expect(item).toBeVisible()
-    const itemBox = await item.boundingBox()
-    expect(itemBox?.width).toBeGreaterThan(0)
-    expect(itemBox?.height).toBeGreaterThan(0)
-    const intersects = itemBox.x < monitorBox.x + monitorBox.width
-      && itemBox.x + itemBox.width > monitorBox.x
-      && itemBox.y < monitorBox.y + monitorBox.height
-      && itemBox.y + itemBox.height > monitorBox.y
-    expect.soft(intersects, `monitor overlaps Item ${index + 1}`).toBe(false)
+    const box = await items.nth(index).boundingBox()
+    if (!box || box.width <= 0 || box.height <= 0) continue
+    const intersects = box.x < atRest.x + atRest.width
+      && box.x + box.width > atRest.x
+      && box.y < atRest.y + atRest.height
+      && box.y + box.height > atRest.y
+    expect.soft(intersects, `monitor overlaps Item ${index + 1} at rest`).toBe(false)
+  }
+
+  // The Core owns the page scroll, so the sandbox frame must never scroll on
+  // its own. This is the invariant that keeps the monitor glued to the content
+  // instead of being overlaid by a separately scrolling iframe.
+  const internalScroll = await themed.locator('body').evaluate(element => {
+    const doc = element.ownerDocument
+    const scrolling = doc.scrollingElement || doc.documentElement
+    return { scrollHeight: scrolling.scrollHeight, clientHeight: scrolling.clientHeight }
+  })
+  expect.soft(
+    internalScroll.scrollHeight,
+    'the theme document must not overflow its frame; Core scrolls the page instead',
+  ).toBeLessThanOrEqual(internalScroll.clientHeight + 1)
+
+  // When the fixture is tall enough to scroll, the band must travel upward
+  // together with the content rather than staying pinned to the viewport.
+  const scrollable = await shell.evaluate(element => element.scrollHeight > element.clientHeight + 1)
+  if (scrollable) {
+    for (const scrollTop of [400, 100000]) {
+      await shell.evaluate((element, top) => { element.scrollTop = top }, scrollTop)
+      await page.waitForTimeout(150)
+      const scrolled = await monitor.boundingBox()
+      expect(scrolled, 'the monitor must stay measurable after scrolling').toBeTruthy()
+      expect.soft(scrolled.y, `monitor must travel upward with the content at scrollTop ${scrollTop}`)
+        .toBeLessThan(atRest.y)
+    }
+    await shell.evaluate(element => { element.scrollTop = 0 })
   }
 }
 
@@ -334,12 +391,13 @@ test('default theme switches Yin/Yang and keeps items clickable with system moni
     await expect(page.locator('[data-testid="theme-runtime-fallback"]')).toHaveCount(0)
     expect(await page.evaluate(() => sessionStorage.getItem('yin-theme-safe-mode'))).toBeNull()
     const themed = page.frameLocator('[data-testid="theme-home-frame"]')
-    const yinSpaceButton = themed.getByRole('button', { name: new RegExp(spaceName) })
-    await expect(yinSpaceButton).toHaveCount(1)
+    // Space selection is a Core surface; the theme no longer renders its own
+    // space navigation, so assert the theme follows the Core selection.
+    await expect(themed.locator('.yin-spaces')).toHaveCount(0)
     const coreSpaceTrigger = page.getByRole('button', { name: /My space/ }).first()
     await coreSpaceTrigger.click()
     await page.getByText(spaceName, { exact: true }).last().click()
-    await expect.poll(async () => yinSpaceButton.getAttribute('aria-current'), { timeout: 15000, intervals: [100, 250, 500] }).toBe('page')
+    await expect(page.locator('.space-status-button')).toContainText(spaceName, { timeout: 15000 })
     await expect(themed.getByRole('button', { name: 'Switch to Yang-Panel' })).toBeVisible()
     await expect(themed.getByText('Yin acceptance item', { exact: true })).toBeVisible()
     await expect(themed.getByText('Yang acceptance item', { exact: true })).toHaveCount(0)
@@ -363,7 +421,19 @@ test('default theme switches Yin/Yang and keeps items clickable with system moni
       return target?.closest('.yin-item') === element
     })
     expect(hit).toBe(true)
-    await assertNoMonitorItemOverlap(page, themed)
+    await assertMonitorScrollsWithContentWithoutOverlap(page, themed)
+    // Playwright auto-scroll aligns to the viewport edge, which on narrow
+    // viewports lands the item under the fixed space selector pinned to the
+    // bottom. The frame no longer scrolls itself, so centre the item by
+    // scrolling the Core shell by the measured offset.
+    const shellLocator = page.locator('.theme-runtime-shell')
+    const shellBox = await shellLocator.boundingBox()
+    const centredBox = await item.boundingBox()
+    if (shellBox && centredBox) {
+      const delta = (centredBox.y + centredBox.height / 2) - (shellBox.y + shellBox.height / 2)
+      await shellLocator.evaluate((element, offset) => { element.scrollTop += offset }, delta)
+      await page.waitForTimeout(150)
+    }
     await item.click()
     const itemDialog = page.getByRole('dialog')
     await expect(itemDialog).toBeVisible()
@@ -461,6 +531,10 @@ test('standard default Yin theme restores legacy presentation features inside th
     for (const spec of itemSpecs)
       await expect(themed.getByRole('button', { name: `Open ${spec.title}` })).toBeVisible()
     await expect(themed.locator('.yin-logo')).toBeVisible()
+    // The brand mark is the side switch and the standalone toggle button and
+    // space navigation must be gone.
+    await expect(themed.locator('.yin-side-toggle')).toHaveCount(0)
+    await expect(themed.locator('.yin-spaces')).toHaveCount(0)
     const clock = themed.locator('[data-testid="theme-home-clock"]')
     expect.soft(await clock.count(), 'the legacy clock with seconds must be rendered in the theme content').toBeGreaterThan(0)
     if (await clock.count())
@@ -512,7 +586,8 @@ test('standard default Yin theme restores legacy presentation features inside th
     if (await search.count()) await search.fill('')
     const baselineMetadata = JSON.parse(await readFile(path.join(testDirectory, 'fixtures', 'yin-theme-baseline-6c69d84-light-1440x900.json'), 'utf8'))
     await expectLegacyGeometry(page.locator('.space-status-bar'), baselineMetadata.geometry['.space-status-bar'], 'space selector')
-    await expectLegacyGeometry(themed.locator('.yin-clock'), baselineMetadata.geometry['.clock'], 'clock')
+    await expectLegacyGeometry(themed.locator('.yin-clock'), baselineMetadata.geometry['.clock'], 'clock', { skipX: true })
+    await expectIdentityBlockCentered(themed, 'desktop')
     await expectLegacyGeometry(themed.locator('.yin-search'), baselineMetadata.geometry['.search-box'], 'search')
     await expectLegacyGeometry(page.getByTestId('theme-runtime-monitor'), baselineMetadata.geometry['.system-monitor-layer'], 'system monitor')
     await expectLegacyGeometry(themed.locator('.yin-group').first(), baselineMetadata.geometry['[data-item-group]'], 'first group')
@@ -526,7 +601,7 @@ test('standard default Yin theme restores legacy presentation features inside th
       return channels.length < 4 || Number(channels[3]) !== 0
     })
     expect.soft(opaqueBackgrounds, 'the theme layers must be transparent over the configured wallpaper').toEqual([])
-    await assertNoMonitorItemOverlap(page, themed)
+    await assertMonitorScrollsWithContentWithoutOverlap(page, themed)
 
     for (const scenario of [
       { mode: 'dark', width: 1440, height: 900 },
@@ -548,7 +623,8 @@ test('standard default Yin theme restores legacy presentation features inside th
       const selector = page.locator('.space-status-bar')
       await expect(selector).toHaveCSS('bottom', '8px')
       const mobileMetadata = JSON.parse(await readFile(path.join(testDirectory, 'fixtures', `yin-theme-baseline-6c69d84-${scenario.mode}-390x844.json`), 'utf8'))
-        await expectLegacyGeometry(modeHome.locator('.yin-clock'), mobileMetadata.geometry['.clock'], 'mobile clock')
+        await expectLegacyGeometry(modeHome.locator('.yin-clock'), mobileMetadata.geometry['.clock'], 'mobile clock', { skipX: true })
+        await expectIdentityBlockCentered(modeHome, 'mobile')
         await expectLegacyGeometry(modeHome.locator('.yin-search'), mobileMetadata.geometry['.search-box'], 'mobile search')
         await expectLegacyGeometry(page.getByTestId('theme-runtime-monitor'), mobileMetadata.geometry['.system-monitor-layer'], 'mobile system monitor')
         await expectLegacyGeometry(modeHome.locator('.yin-group').first(), mobileMetadata.geometry['[data-item-group]'], 'mobile first group')
@@ -693,6 +769,195 @@ test('default Yin mobile home exposes loading, empty, error, offline, keyboard f
     await expect(page.getByTestId('offline-unavailable')).toHaveCount(0)
   }
   finally {
+    await request.dispose()
+  }
+})
+
+test('search engine indicator and the Core selection stay in sync in both layouts', async ({ isolated, playwright, page }) => {
+  test.setTimeout(240000)
+  if (!isolated) throw new Error('Search engine sync requires YIN_PANEL_TEST_BINARY, YIN_PANEL_TEST_WEB_DIR, and YIN_PANEL_TEST_LANG_DIR')
+  const request = await playwright.request.newContext({ baseURL: isolated.url })
+  const user = await login(request, { mail: process.env.YIN_PANEL_TEST_ADMIN_USER || 'admin@yiniot.com', password: process.env.YIN_PANEL_TEST_ADMIN_PASSWORD || 'admin@yiniot.com' })
+  const headers = authHeaders(user)
+  const panel = {
+    backgroundImageSrc: '/assets/bg-forest.webp', wallpaperMode: 'custom', wallpaperKind: 'image',
+    wallpaperSource: '/assets/bg-forest.webp', wallpaperPoster: '/assets/bg-forest.webp', backgroundBlur: 0, backgroundMaskNumber: 0,
+    iconTextColor: '#ffffff', useThemeDefaults: false, iconTextInfoHideDescription: false, iconTextIconHideTitle: false,
+    logoText: 'Yin-Panel', logoImageSrc: '', clockShowSecond: true, searchBoxSearchIcon: true,
+    marginBottom: 5, marginTop: 5, maxWidth: 1200, maxWidthUnit: 'px', marginX: 5, footerHtml: '',
+    systemMonitorShow: true, systemMonitorShowTitle: true, netModeChangeButtonShow: true,
+  }
+  try {
+    await data(await request.post('/api/theme/v2/preference', { headers, data: { packageId: 'org.yin.default', mode: 'light' } }))
+    await page.addInitScript(({ token, userInfo, panel }) => {
+      sessionStorage.removeItem('yin-theme-safe-mode')
+      localStorage.setItem('authStorage', JSON.stringify({ data: { token, userInfo }, expire: null }))
+      localStorage.setItem('panelStorage', JSON.stringify({ data: { panelConfig: { ...panel, searchBoxShow: true } }, expire: null }))
+    }, { token: user.token, userInfo: { id: user.userId || user.id, name: user.name, mail: 'admin@yiniot.com' }, panel })
+    await installMonitorFixture(page)
+
+    // The engine list is the built-in catalogue, so no extra configuration is
+    // needed; only the layout differs between the two passes.
+    for (const layout of ['standard', 'directory']) {
+      await data(await request.post('/api/panel/userConfig/setConfig', { headers, data: { panel: { ...panel, homeLayout: layout, searchBoxShow: true, iconStyle: 1 } } }))
+      await page.goto(`${isolated.url}/`, { waitUntil: 'domcontentloaded' })
+      await expect(page.locator('[data-testid="theme-home-frame"]')).toBeVisible()
+      const themed = page.frameLocator('[data-testid="theme-home-frame"]')
+      const engineSelect = themed.locator('.yin-search-engine')
+      await expect(engineSelect, `${layout}: the engine selector must be present`).toBeVisible()
+      expect(await engineSelect.locator('option').count(), `${layout}: the engine catalogue must be populated`).toBeGreaterThan(2)
+
+      const options = await engineSelect.locator('option').evaluateAll(nodes => nodes.map(node => ({ value: node.value, label: node.textContent })))
+      const first = options[0]
+      const other = options.find(option => option.value !== first.value)
+      const indicator = () => engineSelect.evaluate(node => getComputedStyle(node).backgroundImage)
+
+      await expect.poll(() => indicator(), { message: `${layout}: the indicator must render the selected engine icon` }).not.toBe('none')
+      const initialIcon = await indicator()
+      const initialLabel = await engineSelect.getAttribute('aria-label')
+
+      // The defect under test: switching engines left the icon on the previous
+      // engine because the select never listened for `change`.
+      await engineSelect.selectOption(other.value)
+      await expect.poll(() => indicator(), { message: `${layout}: the engine icon must follow the selection immediately` }).not.toBe(initialIcon)
+      // Each engine's icon asset is named after its title, so the indicator URL
+      // must name the engine that is now selected.
+      const slug = other.label.toLowerCase().replace(/[^a-z0-9]/g, '')
+      expect(await indicator(), `${layout}: the icon must be the newly selected engine's asset`).toContain(slug)
+      expect(await engineSelect.inputValue()).toBe(other.value)
+      expect(await engineSelect.getAttribute('aria-label'), `${layout}: the accessible name must follow the selection`).not.toBe(initialLabel)
+
+      // Switching back must also be reflected, proving it tracks the value
+      // rather than latching on the first change.
+      await engineSelect.selectOption(first.value)
+      await expect.poll(() => indicator(), { message: `${layout}: the icon must return to the original engine` }).toBe(initialIcon)
+    }
+  } finally {
+    await request.dispose()
+  }
+})
+
+test('every layout, mode and icon style keeps the monitor between the search box and the items', async ({ isolated, playwright, page }) => {
+  test.setTimeout(420000)
+  if (!isolated) throw new Error('Combination matrix requires YIN_PANEL_TEST_BINARY, YIN_PANEL_TEST_WEB_DIR, and YIN_PANEL_TEST_LANG_DIR')
+  const request = await playwright.request.newContext({ baseURL: isolated.url })
+  const user = await login(request, { mail: process.env.YIN_PANEL_TEST_ADMIN_USER || 'admin@yiniot.com', password: process.env.YIN_PANEL_TEST_ADMIN_PASSWORD || 'admin@yiniot.com' })
+  const headers = authHeaders(user)
+  // Seed into the space the home actually opens on, otherwise the sweep would
+  // measure a home that has no items to push around.
+  const spaces = await getSpaces(request, headers)
+  let space; let group
+  for (const candidate of spaces) {
+    const groups = await getGroups(request, candidate.id, headers).catch(() => [])
+    if (groups.length) { space = candidate; group = groups[0]; break }
+  }
+  expect(space, 'the isolated instance must expose a space with an icon group').toBeTruthy()
+  const panel = {
+    backgroundImageSrc: '/assets/bg-forest.webp', wallpaperMode: 'custom', wallpaperKind: 'image',
+    wallpaperSource: '/assets/bg-forest.webp', wallpaperPoster: '/assets/bg-forest.webp', backgroundBlur: 0, backgroundMaskNumber: 0,
+    iconTextColor: '#ffffff', useThemeDefaults: false, iconTextInfoHideDescription: false, iconTextIconHideTitle: false,
+    logoText: 'Yin-Panel', logoImageSrc: '', clockShowSecond: true, searchBoxSearchIcon: true, searchBoxShow: true,
+    marginBottom: 5, marginTop: 5, maxWidth: 1200, maxWidthUnit: 'px', marginX: 5, footerHtml: '',
+    systemMonitorShow: true, systemMonitorShowTitle: true, netModeChangeButtonShow: true,
+  }
+  const created = []
+  try {
+    for (let index = 0; index < 14; index += 1)
+      created.push(await createItem(request, space.id, headers, { title: `Matrix item ${index}`, url: `https://example.test/m${index}`, lanUrl: '', description: `matrix ${index}`, openMethod: 3, itemIconGroupId: group.id, icon: { itemType: 1, text: `M${index}` } }))
+
+    for (const mode of ['light', 'dark']) {
+      for (const homeLayout of ['standard', 'directory']) {
+        for (const iconStyle of [1, 0]) {
+          const combo = `${mode}/${homeLayout}/icon${iconStyle}`
+          await data(await request.post('/api/theme/v2/preference', { headers, data: { packageId: 'org.yin.default', mode } }))
+          await data(await request.post('/api/panel/userConfig/setConfig', { headers, data: { panel: { ...panel, homeLayout, iconStyle } } }))
+          await page.addInitScript(({ token, userInfo, panel, mode }) => {
+            sessionStorage.removeItem('yin-theme-safe-mode')
+            localStorage.setItem('authStorage', JSON.stringify({ data: { token, userInfo }, expire: null }))
+            localStorage.setItem('panelStorage', JSON.stringify({ data: { panelConfig: panel }, expire: null }))
+            if (mode === 'dark') document.documentElement.classList.add('dark')
+          }, { token: user.token, userInfo: { id: user.userId || user.id, name: user.name, mail: 'admin@yiniot.com' }, panel: { ...panel, homeLayout, iconStyle }, mode })
+          await installMonitorFixture(page)
+          await page.goto(`${isolated.url}/`, { waitUntil: 'domcontentloaded' })
+          await expect(page.locator('[data-testid="theme-home-frame"]'), `${combo}: the theme frame must mount`).toBeVisible()
+          const themed = page.frameLocator('[data-testid="theme-home-frame"]')
+          await expect(themed.getByText('Matrix item 0', { exact: true }), `${combo}: the seeded items must render`).toBeVisible({ timeout: 15000 })
+
+          const frame = await page.locator('[data-testid="theme-home-frame"]').boundingBox()
+          const viewportHeight = page.viewportSize()?.height ?? 900
+          const pill = await page.locator('.space-status-bar').evaluate(element => {
+            const button = element.querySelector('.space-status-button')
+            return {
+              background: getComputedStyle(element).backgroundColor,
+              color: button ? getComputedStyle(button).color : null,
+              minWidth: button ? getComputedStyle(button).minWidth : null,
+            }
+          })
+          const monitor = await page.getByTestId('theme-runtime-monitor').evaluate(element => {
+            const rect = element.getBoundingClientRect()
+            return { top: rect.top, height: rect.height }
+          })
+          const inner = await themed.locator('.yin-page').evaluate(page => {
+            const top = selector => {
+              const node = document.querySelector(selector)
+              return node ? node.getBoundingClientRect().top : null
+            }
+            const style = getComputedStyle(page)
+            return {
+              logo: top('.yin-logo'), search: top('.yin-search'), item: top('.yin-item'),
+              paddingTop: style.paddingTop,
+              viewportHeight: style.getPropertyValue('--yin-viewport-height').trim(),
+            }
+          })
+
+          // The iframe is sized by its content, so its height is legitimately
+          // taller than the viewport. What must never happen is the content
+          // offset feeding back into that height: the frame is sized to its
+          // content, `1vh` then resolves against the frame instead of the
+          // viewport, and each pass multiplies the offset until the page grows
+          // without bound. The signature is dead space above the logo, so
+          // measure the logo's distance from the top of the frame.
+          expect(frame, `${combo}: the frame must be measurable`).not.toBeNull()
+          const logoOffset = (inner.logo ?? 0) - (frame?.y ?? 0)
+          expect(logoOffset, `${combo}: the logo must sit at the top of the frame, not below a runaway offset`).toBeLessThanOrEqual(200)
+          expect(logoOffset, `${combo}: the logo must not be pushed above the frame`).toBeGreaterThanOrEqual(-1)
+          expect(frame?.height ?? 0, `${combo}: the frame must stay a bounded multiple of the viewport`).toBeLessThanOrEqual(viewportHeight * 8)
+          expect(inner.viewportHeight, `${combo}: the content offset must be pinned to a pixel viewport height`).toMatch(/^\d+px$/)
+          expect(Math.abs(Number.parseFloat(inner.paddingTop)), `${combo}: the content offset must be a stable pixel value`).toBeLessThanOrEqual(200)
+
+          // The requirement the whole layout exists to satisfy: the monitor sits
+          // after the search box and before the first item, without overlapping.
+          expect(inner.search, `${combo}: the search box must be measured`).not.toBeNull()
+          expect(inner.item, `${combo}: an item must be measured`).not.toBeNull()
+          expect(monitor.top + monitor.height, `${combo}: the monitor must end above the first item`).toBeLessThanOrEqual(inner.item + 1)
+          expect(inner.search, `${combo}: the monitor must start below the search box`).toBeLessThanOrEqual(monitor.top + 1)
+          expect(inner.logo, `${combo}: the logo must stay above the search box`).toBeLessThan(inner.search)
+
+          // Regression guard: the Core's own light-surface rule for the
+          // directory layout used to win over the Yin pill override, leaving
+          // white label text on a white pill.
+          const channels = (value) => (value || '').match(/rgba?\(([^)]+)\)/)?.[1]?.split(',').map(part => Number(part.trim())) || []
+          const [pillRed, pillGreen, pillBlue, pillAlpha = 1] = channels(pill.background)
+          const [textRed, textGreen, textBlue, textAlpha = 1] = channels(pill.color)
+          expect(pillAlpha, `${combo}: the space pill must stay a translucent dark surface, got ${pill.background}`).toBeLessThan(1)
+          expect(Math.max(pillRed, pillGreen, pillBlue) + pillAlpha, `${combo}: the space pill must not be a bright surface, got ${pill.background}`).toBeLessThan(200)
+          const luminance = (red, green, blue) => {
+            const channel = value => {
+              const scaled = value / 255
+              return scaled <= 0.03928 ? scaled / 12.92 : ((scaled + 0.055) / 1.055) ** 2.4
+            }
+            return 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue)
+          }
+          const contrast = (Math.max(luminance(pillRed, pillGreen, pillBlue), luminance(textRed, textGreen, textBlue)) + 0.05)
+            / (Math.min(luminance(pillRed, pillGreen, pillBlue), luminance(textRed, textGreen, textBlue)) + 0.05)
+          expect(contrast, `${combo}: the space pill label needs readable contrast, got ${pill.color} on ${pill.background}`).toBeGreaterThan(3)
+          expect(textAlpha, `${combo}: the space pill label must be opaque`).toBe(1)
+          expect(pill.minWidth, `${combo}: the Yin pill override must survive the Core layout rules`).toBe('122px')
+        }
+      }
+    }
+  } finally {
+    for (const item of created) await request.delete(`/api/spaces/${space.id}/items/${item.id}`, { headers }).catch(() => {})
     await request.dispose()
   }
 })

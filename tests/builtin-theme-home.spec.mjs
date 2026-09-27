@@ -99,12 +99,35 @@ test('all built-in theme home views render real items and expose immutable packa
         await expect(themedHome.locator('.yin-item-title')).toHaveText('Theme E2E Item')
         await expect(themedHome.locator('.yin-group-title').filter({ hasText: group.title })).toBeVisible()
         await expect(themedHome.locator('.yin-item-icon')).toHaveText('T')
+        // The theme no longer ships its own space navigation, and the brand mark
+        // is the side switch rather than a separate button.
+        await expect(themedHome.locator('.yin-spaces')).toHaveCount(0)
+        await expect(themedHome.locator('.yin-side-toggle')).toHaveCount(0)
+        await expect(themedHome.locator('.yin-logo[data-testid="theme-side-toggle"]')).toHaveCount(1)
       }
       else {
         await expect(themedHome.locator('.item-button')).toHaveCount(1)
         await expect(themedHome.locator('.item-title')).toHaveText('Theme E2E Item')
         await expect(themedHome.locator('.group-title').filter({ hasText: group.title })).toBeVisible()
         await expect(themedHome.locator('.item-icon')).toHaveText('T')
+        // Same two guarantees as the default theme: no duplicated space
+        // navigation, and the brand mark carries the side switch.
+        await expect(themedHome.locator('.home-spaces'), `${pkg.name} must not render its own space navigation`).toHaveCount(0)
+        await expect(themedHome.locator('.side-toggle'), `${pkg.name} must not render a duplicate side toggle button`).toHaveCount(0)
+        const brandSwitch = themedHome.locator('.home-title[data-testid="theme-side-toggle"]')
+        await expect(brandSwitch, `${pkg.name} must expose the brand mark as the side switch`).toHaveCount(1)
+        await expect(brandSwitch).toHaveAttribute('role', 'button')
+        // The side switch must be reachable and operable from the keyboard, not
+        // only by pointer.
+        await expect(brandSwitch).toHaveAttribute('tabindex', '0')
+        await expect(brandSwitch).toHaveAttribute('aria-label', /Switch to (Yin|Yang)-Panel/)
+        const isActionable = await brandSwitch.evaluate(element => {
+          const rect = element.getBoundingClientRect()
+          if (rect.width < 1 || rect.height < 1) return false
+          const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+          return hit === element
+        })
+        expect(isActionable, `${pkg.name}: the brand mark must be the hit-test target, not a transparent overlay`).toBe(true)
       }
     }
 

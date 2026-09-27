@@ -73,10 +73,13 @@ async function assertDirectoryMonitorGeometry(page, themed, viewport) {
   }
 }
 
-async function selectDirectorySpace(themed, name) {
-  const spaceButton = themed.getByRole('button', { name: new RegExp(name) })
-  await expect(spaceButton).toHaveCount(1)
-  await spaceButton.click()
+// The Yin theme no longer renders its own space navigation; space selection
+// lives in the Core space selector, so switch there and let the theme follow.
+async function selectDirectorySpace(page, themed, name) {
+  const coreSpaceTrigger = page.locator('.space-status-button')
+  await expect(coreSpaceTrigger).toBeVisible()
+  await coreSpaceTrigger.click()
+  await page.locator('.n-dropdown-menu:visible').last().getByText(name, { exact: true }).click()
   const folderNav = themed.getByRole('navigation', { name: 'Bookmark groups' })
   const alphaButton = folderNav.getByRole('button', { name: 'P0 Directory Alpha', exact: true })
   await expect(alphaButton).toBeVisible()
@@ -176,7 +179,7 @@ test('directory layout never renders only its background when bookmark data exis
       await expect(page.getByTestId('theme-runtime-fallback')).toHaveCount(0)
       expect(await page.evaluate(() => sessionStorage.getItem('yin-theme-safe-mode'))).toBeNull()
       const themed = page.frameLocator('[data-testid="theme-home-frame"]')
-      await selectDirectorySpace(themed, spaceName)
+      await selectDirectorySpace(page, themed, spaceName)
 
       const folderNav = themed.getByRole('navigation', { name: 'Bookmark groups' })
       expect.soft(await folderNav.count(), 'directory theme must expose bookmark folder navigation').toBeGreaterThan(0)
