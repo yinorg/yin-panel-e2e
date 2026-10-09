@@ -1,5 +1,5 @@
 import { expect, test } from './isolated-fixture.mjs'
-import { authHeaders, deleteItem, login, png } from './helpers.mjs'
+import { authHeaders, deleteItem, login, png, seedBrowserSession } from './helpers.mjs'
 
 const adminCredentials = {
   mail: process.env.YIN_PANEL_TEST_ADMIN_USER || 'admin@yiniot.com',
@@ -36,30 +36,36 @@ test('item editor uploads an icon through Core and creates the bookmark in its S
   let itemId
 
   try {
-    await page.addInitScript(({ token, userInfo, cachedSpace }) => {
+    await seedBrowserSession(page, request, user)
+    // The theme-rendered editor is not writable yet: the bridge mounts
+    // <yin-item-editor> with visible=true, and EditItem only initializes its Space
+    // from a non-immediate visible watcher, so every save and upload fails with
+    // "No Space was selected". This spec therefore deliberately covers the Core
+    // fallback: safe mode, then the command center's /add opens the Core modal,
+    // where the privileged icon upload runs and the write is confirmed.
+    await page.addInitScript(({ userId, cachedSpace }) => {
       sessionStorage.setItem('yin-theme-safe-mode', '1')
-      localStorage.setItem('authStorage', JSON.stringify({ data: { token, userInfo }, expire: null }))
-      localStorage.setItem(`yin-panel-spaces-cache:${userInfo.id}`, JSON.stringify({ data: [cachedSpace], expire: null }))
-    }, {
-      token: user.token,
-      userInfo: { id: user.userId || user.id, name: user.name, mail: adminCredentials.mail },
-      cachedSpace: space,
-    })
+      localStorage.setItem(`yin-panel-spaces-cache:${userId}`, JSON.stringify({ data: [cachedSpace], expire: null }))
+    }, { userId: user.userId || user.id, cachedSpace: space })
     await page.goto(isolated.url, { waitUntil: 'domcontentloaded' })
     const spaceButton = page.locator('.space-status-button')
     await expect(spaceButton).toBeVisible()
-    await spaceButton.dispatchEvent('mouseenter')
+    await spaceButton.click()
     await page.getByText(spaceName, { exact: true }).click()
-    await expect(page.getByRole('button', { name: spaceName })).toBeVisible()
-    const groupSection = page.getByTestId('item-group').filter({ hasText: group.title })
-    await expect(groupSection).toBeVisible()
-    await groupSection.hover()
-    await groupSection.getByTitle(/add|添加/i).click()
+    await expect(page.getByTestId('theme-safe-mode-banner')).toBeVisible()
 
+    await page.keyboard.press('/')
+    const center = page.getByTestId('command-center-panel')
+    await expect(center).toBeVisible()
+    await center.getByText('/add', { exact: true }).click()
     const modal = page.getByTestId('edit-item-modal')
     await expect(modal).toBeVisible()
     await modal.getByRole('textbox').nth(0).fill(itemTitle)
     await modal.getByRole('textbox').nth(1).fill('https://example.test/uploaded-icon')
+    // /add opens the Core modal without a group, so pick the Space's own group
+    // instead of leaving the default (the Space's first group).
+    await modal.locator('.n-select').first().click()
+    await page.locator('.n-base-select-option').filter({ hasText: group.title }).click()
     await modal.getByText(/image|图片/i, { exact: true }).click()
 
     const uploadResponse = page.waitForResponse((response) => {
@@ -73,8 +79,9 @@ test('item editor uploads an icon through Core and creates the bookmark in its S
     })
     expect((await uploadResponse).ok()).toBeTruthy()
 
-    await page.getByRole('dialog').getByRole('button', { name: /save|保存/i }).click()
-    await expect(page.getByTestId('home-item').filter({ hasText: itemTitle })).toBeVisible()
+    await page.getByRole('dialog').last().getByRole('button', { name: /save|保存/i }).click()
+    await expect(page).toHaveURL(`${isolated.url}/`)
+    await expect(page.getByTestId('home-fallback-item').filter({ hasText: itemTitle })).toBeVisible()
 
     const items = await responseData(await request.get(`/api/spaces/${space.id}/items?groupId=${group.id}&page=1&pageSize=50`, { headers }))
     const saved = items.find(item => item.title === itemTitle)

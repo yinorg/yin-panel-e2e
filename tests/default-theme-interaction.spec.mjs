@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from './isolated-fixture.mjs'
-import { authHeaders, createItem, createSharedSpace, createSpace, getGroups, getItems, getSpaces, login, png } from './helpers.mjs'
+import { authHeaders, createItem, createSharedSpace, createSpace, getGroups, getItems, getSpaces, login, png, seedBrowserSession, themeHomeRoot } from './helpers.mjs'
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url))
 
@@ -16,7 +16,14 @@ async function compareLegacyBaseline(page, testInfo, mode, width, height) {
     caret: 'hide',
   })
   const comparison = await page.evaluate(async ({ expected, actual, viewport }) => {
-    const decode = async source => createImageBitmap(await fetch(`data:image/png;base64,${source}`).then(response => response.blob()))
+    // The Core's CSP restricts connect-src/img-src to 'self', so a data: URL
+    // cannot be fetched from the page. Decode the base64 directly instead.
+    const decode = async source => {
+      const binary = atob(source)
+      const bytes = new Uint8Array(binary.length)
+      for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index)
+      return createImageBitmap(new Blob([bytes], { type: 'image/png' }))
+    }
     const [left, right] = await Promise.all([decode(expected), decode(actual)])
     if (left.width !== viewport.width || left.height !== viewport.height
       || right.width % left.width !== 0 || right.height % left.height !== 0
@@ -57,8 +64,15 @@ async function expectLegacyGeometry(locator, expected, label, options = {}) {
   expect(box, `${label} must have a measurable rectangle`).not.toBeNull()
   if (!options.skipX)
     expect(Math.abs(box.x - expected.x), `${label} x offset`).toBeLessThanOrEqual(8)
-  expect(Math.abs(box.y - expected.y), `${label} y offset`).toBeLessThanOrEqual(8)
-  expect(Math.abs(box.width - expected.width) / expected.width, `${label} width`).toBeLessThanOrEqual(0.05)
+  if (!options.skipY) {
+    const expectedY = expected.y + (options.offsetY || 0)
+    expect(Math.abs(box.y - expectedY), `${label} y offset`).toBeLessThanOrEqual(8)
+  }
+  // The clock's width is derived from its rendered date string, which the theme
+  // intentionally localizes (long weekday and month), so the legacy width is no
+  // longer an invariant; the height and the centering checks still are.
+  if (!options.skipWidth)
+    expect(Math.abs(box.width - expected.width) / expected.width, `${label} width`).toBeLessThanOrEqual(0.05)
   expect(Math.abs(box.height - expected.height) / expected.height, `${label} height actual=${box.height} expected=${expected.height}`).toBeLessThanOrEqual(0.05)
 }
 
@@ -154,22 +168,18 @@ async function runYinMutationWorkflow({ isolated, page, playwright }, layout) {
       data: { panel: { homeLayout: layout, systemMonitorShow: false, searchBoxShow: true, searchBoxSearchIcon: true } },
     }))
 
-    await page.addInitScript(({ token, userInfo }) => {
-      sessionStorage.removeItem('yin-theme-safe-mode')
-      localStorage.setItem('authStorage', JSON.stringify({ data: { token, userInfo }, expire: null }))
-    }, { token: user.token, userInfo: { id: user.userId || user.id, name: user.name, mail: 'admin@yiniot.com' } })
+    await seedBrowserSession(page, request, user)
     await page.route('**/sw.js', route => route.abort())
     await page.goto(`${isolated.url}/`, { waitUntil: 'domcontentloaded' })
-    const frame = page.locator('[data-testid="theme-home-frame"]')
-    await expect(frame).toBeVisible()
+    await expect(page.getByTestId('theme-trusted-host')).toBeVisible()
     await expect(page.getByTestId('theme-safe-mode-banner')).toHaveCount(0)
-    const themed = page.frameLocator('[data-testid="theme-home-frame"]')
-    await expect(themed.locator('form'), 'Yin must use the supported sandbox-safe submission controls').toHaveCount(0)
+    const themed = themeHomeRoot(page)
+    await expect(themed.locator('form'), 'Yin must keep its submission controls in script, not native forms').toHaveCount(0)
     await page.getByRole('button', { name: /My space/ }).first().click()
     await page.getByText(spaceName, { exact: true }).last().click()
     await expect(themed.getByRole('button', { name: 'Switch to Yang-Panel' })).toBeVisible()
-    await expect(themed.getByRole('button', { name: 'Open P3 Sort A' })).toBeVisible()
-    await expect(themed.getByRole('button', { name: 'Open P3 Sort B' })).toBeVisible()
+    await expect(themed.getByRole('link', { name: 'Open P3 Sort A' })).toBeVisible()
+    await expect(themed.getByRole('link', { name: 'Open P3 Sort B' })).toBeVisible()
 
     const selectDirectoryGroup = async (title) => {
       if (layout !== 'directory') return
@@ -178,10 +188,10 @@ async function runYinMutationWorkflow({ isolated, page, playwright }, layout) {
     }
     await selectDirectoryGroup(group.title)
 
-    const search = themed.getByRole('searchbox', { name: 'Search bookmarks' })
+    const search = themed.getByRole('textbox', { name: 'Search bookmarks' })
     await search.fill('P3 Sort B')
-    await expect(themed.getByRole('button', { name: 'Open P3 Sort B' })).toBeVisible()
-    await expect(themed.getByRole('button', { name: 'Open P3 Sort A' })).toHaveCount(0)
+    await expect(themed.getByRole('link', { name: 'Open P3 Sort B' })).toBeVisible()
+    await expect(themed.getByRole('link', { name: 'Open P3 Sort A' })).toHaveCount(0)
     await search.fill('')
 
     const addGroup = themed.getByTestId('theme-add-group')
@@ -230,32 +240,32 @@ async function runYinMutationWorkflow({ isolated, page, playwright }, layout) {
     await editorFields.nth(1).fill('P3')
     await editorFields.nth(2).fill(`https://example.test/${layout}-created`)
     await page.getByRole('dialog').last().getByRole('button', { name: /save|保存/i }).click()
-    await expect(themed.getByRole('button', { name: `Open ${itemTitle}` })).toBeVisible()
+    await expect(themed.getByRole('link', { name: `Open ${itemTitle}` })).toBeVisible()
     const createdItemRecord = (await getItems(request, yin.id, headers, group.id)).find(value => value.title === itemTitle)
     expect(createdItemRecord, 'Core must persist an Item created from the Yin Theme').toBeTruthy()
     createdFromTheme = createdItemRecord.id
     createdItemIds.push(createdFromTheme)
 
-    const itemToEdit = themed.getByRole('button', { name: 'Open P3 Sort A' })
+    const itemToEdit = themed.getByRole('link', { name: 'Open P3 Sort A' })
     await itemToEdit.click({ button: 'right' })
     await themed.getByTestId('theme-edit-item').click()
     await expect(itemModal).toBeVisible()
     const editedItemTitle = `P3 Edit ${layout}`
     await itemModal.getByRole('textbox').nth(0).fill(editedItemTitle)
     await page.getByRole('dialog').last().getByRole('button', { name: /save|保存/i }).click()
-    await expect(themed.getByRole('button', { name: `Open ${editedItemTitle}` })).toBeVisible()
+    await expect(themed.getByRole('link', { name: `Open ${editedItemTitle}` })).toBeVisible()
     const editedRecord = (await getItems(request, yin.id, headers, group.id)).find(value => String(value.id) === String(sortA.id))
     expect(editedRecord?.title).toBe(editedItemTitle)
 
     const orderedBefore = await getItems(request, yin.id, headers, group.id)
     const firstSorted = orderedBefore[0]
     const expectedNext = orderedBefore[1]
-    await themed.getByRole('button', { name: `Open ${firstSorted.title}` }).click({ button: 'right' })
+    await themed.getByRole('link', { name: `Open ${firstSorted.title}` }).click({ button: 'right' })
     await themed.getByTestId('theme-reorder-item-down').click()
     await expect.poll(async () => (await getItems(request, yin.id, headers, group.id)).map(value => String(value.id)).slice(0, 2).join(','))
       .toBe(`${expectedNext.id},${firstSorted.id}`)
 
-    const itemToDelete = themed.getByRole('button', { name: `Open ${editedItemTitle}` })
+    const itemToDelete = themed.getByRole('link', { name: `Open ${editedItemTitle}` })
     await itemToDelete.click({ button: 'right' })
     await themed.getByTestId('theme-delete-item').click()
     const cancelDialog = page.locator('.n-dialog').filter({ has: page.getByRole('button', { name: /cancel|取消/i }) })
@@ -264,20 +274,20 @@ async function runYinMutationWorkflow({ isolated, page, playwright }, layout) {
     await expect(cancelDialog).toHaveCount(0)
     expect((await getItems(request, yin.id, headers, group.id)).some(value => String(value.id) === String(sortA.id))).toBe(true)
 
-    await themed.getByRole('button', { name: `Open ${editedItemTitle}` }).click({ button: 'right' })
+    await themed.getByRole('link', { name: `Open ${editedItemTitle}` }).click({ button: 'right' })
     await themed.getByTestId('theme-delete-item').click()
     const confirmDialog = page.locator('.n-dialog').filter({ has: page.getByRole('button', { name: /confirm|确定/i }) })
     await expect(confirmDialog).toBeVisible()
     await confirmDialog.getByRole('button', { name: /confirm|确定/i }).click()
-    await expect(themed.getByRole('button', { name: `Open ${editedItemTitle}` })).toHaveCount(0)
+    await expect(themed.getByRole('link', { name: `Open ${editedItemTitle}` })).toHaveCount(0)
     expect((await getItems(request, yin.id, headers, group.id)).some(value => String(value.id) === String(sortA.id))).toBe(false)
     createdItemIds.splice(createdItemIds.indexOf(sortA.id), 1)
 
     await themed.getByRole('button', { name: 'Switch to Yang-Panel' }).click()
-    await expect(themed.getByRole('button', { name: 'Open P3 Yang ' + layout })).toBeVisible()
+    await expect(themed.getByRole('link', { name: 'Open P3 Yang ' + layout })).toBeVisible()
     await themed.getByRole('button', { name: 'Switch to Yin-Panel' }).click()
     await selectDirectoryGroup(group.title)
-    await expect(themed.getByRole('button', { name: 'Open P3 Sort B' })).toBeVisible()
+    await expect(themed.getByRole('link', { name: 'Open P3 Sort B' })).toBeVisible()
     await expect(page.locator('.sun-main[data-panel-side]')).toHaveAttribute('data-panel-side', 'yin')
   }
   finally {
@@ -289,12 +299,13 @@ async function runYinMutationWorkflow({ isolated, page, playwright }, layout) {
   }
 }
 
-// The system monitor is an absolutely positioned band inside the scrolling
-// theme shell, mirroring the Core home: it sits right below the search box and
-// travels with the page instead of floating over it. At rest the collection is
-// offset below the band, so nothing hides behind it.
+// The default theme renders the Core's monitor component itself, in flow: the
+// band is `.yin-monitor` inside the theme root and the Core's own overlay steps
+// aside. It sits right below the search box and travels with the Core-owned page
+// scroll instead of floating over it. At rest the collection is offset below the
+// band, so nothing hides behind it.
 async function assertMonitorScrollsWithContentWithoutOverlap(page, themed) {
-  const monitor = page.locator('[data-testid="theme-runtime-monitor"]')
+  const monitor = themed.locator('.yin-monitor')
   await expect(monitor).toBeVisible()
   const shell = page.locator('.theme-runtime-shell')
   await expect(shell).toBeVisible()
@@ -305,7 +316,7 @@ async function assertMonitorScrollsWithContentWithoutOverlap(page, themed) {
 
   const items = themed.locator('.yin-item')
   const itemCount = await items.count()
-  expect(itemCount, 'the sandbox must render real Item buttons').toBeGreaterThan(0)
+  expect(itemCount, 'the theme must render real Item buttons').toBeGreaterThan(0)
   for (let index = 0; index < itemCount; index++) {
     const box = await items.nth(index).boundingBox()
     if (!box || box.width <= 0 || box.height <= 0) continue
@@ -316,21 +327,10 @@ async function assertMonitorScrollsWithContentWithoutOverlap(page, themed) {
     expect.soft(intersects, `monitor overlaps Item ${index + 1} at rest`).toBe(false)
   }
 
-  // The Core owns the page scroll, so the sandbox frame must never scroll on
-  // its own. This is the invariant that keeps the monitor glued to the content
-  // instead of being overlaid by a separately scrolling iframe.
-  const internalScroll = await themed.locator('body').evaluate(element => {
-    const doc = element.ownerDocument
-    const scrolling = doc.scrollingElement || doc.documentElement
-    return { scrollHeight: scrolling.scrollHeight, clientHeight: scrolling.clientHeight }
-  })
-  expect.soft(
-    internalScroll.scrollHeight,
-    'the theme document must not overflow its frame; Core scrolls the page instead',
-  ).toBeLessThanOrEqual(internalScroll.clientHeight + 1)
-
   // When the fixture is tall enough to scroll, the band must travel upward
-  // together with the content rather than staying pinned to the viewport.
+  // together with the content rather than staying pinned to the viewport. The
+  // Core owns the page scroll; the direct-mounted theme must not become a
+  // second scroller that would leave the band behind.
   const scrollable = await shell.evaluate(element => element.scrollHeight > element.clientHeight + 1)
   if (scrollable) {
     for (const scrollTop of [400, 100000]) {
@@ -343,6 +343,49 @@ async function assertMonitorScrollsWithContentWithoutOverlap(page, themed) {
     }
     await shell.evaluate(element => { element.scrollTop = 0 })
   }
+}
+
+// The theme renders the Core's monitor in flow, so its legacy overlay geometry no
+// longer applies. The invariant that matters is the band's position in the page:
+// it must sit below the search box and above the collection, with a real size.
+async function expectMonitorBetweenSearchAndItems(themed, label) {
+  const monitor = themed.locator('.yin-monitor')
+  const search = themed.getByTestId('theme-home-search')
+  const collection = themed.locator('.yin-collection')
+  await expect(monitor, `${label}: the theme must render the monitor band`).toBeVisible()
+  await expect(search, `${label}: the theme must render the search box`).toBeVisible()
+  await expect(collection, `${label}: the theme must render the collection`).toBeVisible()
+  const [monitorBox, searchBox, collectionBox] = await Promise.all([
+    monitor.boundingBox(),
+    search.boundingBox(),
+    collection.boundingBox(),
+  ])
+  for (const [name, box] of Object.entries({ monitor: monitorBox, search: searchBox, collection: collectionBox }))
+    expect(box, `${label}: ${name} must have a measurable rectangle`).not.toBeNull()
+  expect(monitorBox.width, `${label}: the monitor must span a real band`).toBeGreaterThan(0)
+  expect(monitorBox.height, `${label}: the monitor must have a real height`).toBeGreaterThan(0)
+  expect(monitorBox.y, `${label}: the monitor must start below the search box`).toBeGreaterThanOrEqual(searchBox.y + searchBox.height - 1)
+  expect(monitorBox.y + monitorBox.height, `${label}: the monitor must end above the collection`).toBeLessThanOrEqual(collectionBox.y + 1)
+}
+
+// The vertical order of the home is the layout contract the theme must keep:
+// search, then the in-flow monitor band, then the collection with its items, and
+// finally the footer. The absolute legacy y coordinates are not usable below the
+// monitor because it now occupies flow space instead of floating over it.
+async function expectHomeVerticalOrder(themed, label) {
+  const [search, monitor, collection, firstItem, footer] = await Promise.all([
+    themed.getByTestId('theme-home-search').boundingBox(),
+    themed.locator('.yin-monitor').boundingBox(),
+    themed.locator('.yin-collection').boundingBox(),
+    themed.locator('.yin-item').first().boundingBox(),
+    themed.locator('.yin-footer').boundingBox(),
+  ])
+  for (const [name, box] of Object.entries({ search, monitor, collection, firstItem, footer }))
+    expect(box, `${label}: ${name} must have a measurable rectangle`).not.toBeNull()
+  expect(monitor.y, `${label}: the monitor must start below the search box`).toBeGreaterThanOrEqual(search.y + search.height - 1)
+  expect(collection.y, `${label}: the collection must start below the monitor`).toBeGreaterThanOrEqual(monitor.y + monitor.height - 1)
+  expect(firstItem.y, `${label}: the first Item must sit inside the collection`).toBeGreaterThanOrEqual(collection.y - 1)
+  expect(firstItem.y + firstItem.height, `${label}: the first Item must end above the footer`).toBeLessThanOrEqual(footer.y + 1)
 }
 
 test('default theme switches Yin/Yang and keeps items clickable with system monitor enabled', async ({ isolated, playwright, page }) => {
@@ -365,9 +408,8 @@ test('default theme switches Yin/Yang and keeps items clickable with system moni
     await data(await request.post('/api/theme/v2/preference', { headers, data: { packageId: 'org.yin.default', mode: 'light' } }))
     await data(await request.post('/api/panel/userConfig/setConfig', { headers, data: { panel: { homeLayout: 'directory', systemMonitorShow: true, systemMonitorShowTitle: true, searchBoxShow: false } } }))
 
-    await page.addInitScript(({ token, userInfo }) => {
-      sessionStorage.removeItem('yin-theme-safe-mode')
-      localStorage.setItem('authStorage', JSON.stringify({ data: { token, userInfo }, expire: null }))
+    await seedBrowserSession(page, request, user)
+    await page.addInitScript(() => {
       localStorage.setItem('panelStorage', JSON.stringify({ data: { panelConfig: {
         homeLayout: 'directory', backgroundImageSrc: '/assets/bg-forest.webp', wallpaperMode: 'custom', wallpaperKind: 'image',
         wallpaperSource: '/assets/bg-forest.webp', wallpaperPoster: '/assets/bg-forest.webp', backgroundBlur: 0, backgroundMaskNumber: 0,
@@ -376,7 +418,7 @@ test('default theme switches Yin/Yang and keeps items clickable with system moni
         marginBottom: 5, marginTop: 5, maxWidth: 1200, maxWidthUnit: 'px', marginX: 5, footerHtml: '',
         systemMonitorShow: true, systemMonitorShowTitle: true, netModeChangeButtonShow: true,
       } }, expire: null }))
-    }, { token: user.token, userInfo: { id: user.userId || user.id, name: user.name, mail: 'admin@yiniot.com' } })
+    })
     await installMonitorFixture(page)
     await installIconifyFixture(page)
     const runtimeErrors = []
@@ -385,12 +427,11 @@ test('default theme switches Yin/Yang and keeps items clickable with system moni
       if (message.type() === 'error') runtimeErrors.push(message.text())
     })
     await page.goto(`${isolated.url}/`, { waitUntil: 'domcontentloaded' })
-    const frame = page.locator('[data-testid="theme-home-frame"]')
-    await expect(frame).toBeVisible()
+    await expect(page.getByTestId('theme-trusted-host')).toBeVisible()
     await expect(page.locator('[data-testid="theme-safe-mode-banner"]')).toHaveCount(0)
     await expect(page.locator('[data-testid="theme-runtime-fallback"]')).toHaveCount(0)
     expect(await page.evaluate(() => sessionStorage.getItem('yin-theme-safe-mode'))).toBeNull()
-    const themed = page.frameLocator('[data-testid="theme-home-frame"]')
+    const themed = themeHomeRoot(page)
     // Space selection is a Core surface; the theme no longer renders its own
     // space navigation, so assert the theme follows the Core selection.
     await expect(themed.locator('.yin-spaces')).toHaveCount(0)
@@ -412,7 +453,7 @@ test('default theme switches Yin/Yang and keeps items clickable with system moni
     await expect(themed.getByText('Yin acceptance item', { exact: true })).toHaveCount(0)
     await expect(page.locator('.sun-main[data-panel-side]')).toHaveAttribute('data-panel-side', 'yang')
 
-    const item = themed.getByRole('button', { name: 'Open Yang acceptance item' })
+    const item = themed.getByRole('link', { name: 'Open Yang acceptance item' })
     const box = await item.boundingBox()
     expect(box?.width).toBeGreaterThan(0)
     const hit = await item.evaluate(element => {
@@ -492,10 +533,7 @@ test('standard default Yin theme restores legacy presentation features inside th
     const savedConfig = await data(await request.get('/api/panel/userConfig/getConfig', { headers }))
     expect(savedConfig.panel.footerHtml).toContain('P0 footer fixture')
 
-    await page.addInitScript(({ token, userInfo }) => {
-      sessionStorage.removeItem('yin-theme-safe-mode')
-      localStorage.setItem('authStorage', JSON.stringify({ data: { token, userInfo }, expire: null }))
-    }, { token: user.token, userInfo: { id: user.userId || user.id, name: user.name, mail: 'admin@yiniot.com' } })
+    await seedBrowserSession(page, request, user)
     await page.addInitScript(() => {
       const fixedNow = Date.parse('2026-01-01T12:00:00.000Z')
       const NativeDate = Date
@@ -522,14 +560,14 @@ test('standard default Yin theme restores legacy presentation features inside th
     })
     await page.goto(`${isolated.url}/`, { waitUntil: 'domcontentloaded' })
 
-    await expect(page.locator('[data-testid="theme-home-frame"]')).toBeVisible()
+    await expect(page.getByTestId('theme-trusted-host')).toBeVisible()
     await expect(page.locator('[data-testid="theme-safe-mode-banner"]')).toHaveCount(0)
     await expect(page.locator('[data-testid="theme-runtime-fallback"]')).toHaveCount(0)
     expect(await page.evaluate(() => sessionStorage.getItem('yin-theme-safe-mode'))).toBeNull()
-    const themed = page.frameLocator('[data-testid="theme-home-frame"]')
+    const themed = themeHomeRoot(page)
     await expect(page.getByRole('button', { name: /My space/ }).first()).toBeVisible()
     for (const spec of itemSpecs)
-      await expect(themed.getByRole('button', { name: `Open ${spec.title}` })).toBeVisible()
+      await expect(themed.getByRole('link', { name: `Open ${spec.title}` })).toBeVisible()
     await expect(themed.locator('.yin-logo')).toBeVisible()
     // The brand mark is the side switch and the standalone toggle button and
     // space navigation must be gone.
@@ -539,26 +577,26 @@ test('standard default Yin theme restores legacy presentation features inside th
     expect.soft(await clock.count(), 'the legacy clock with seconds must be rendered in the theme content').toBeGreaterThan(0)
     if (await clock.count())
       expect.soft(await clock.first().textContent()).toMatch(/^\d{2}:\d{2}:\d{2}/)
-    const search = themed.locator('input[type="search"]')
+    const search = themed.getByRole('textbox', { name: 'Search bookmarks' })
     expect.soft(await search.count(), 'the configured legacy search control must be present in the theme').toBeGreaterThan(0)
     if (await search.count()) {
       await expect.soft(search).toBeVisible()
       await search.fill('P0 Vector Icon')
-      await expect.soft(themed.getByRole('button', { name: 'Open P0 Vector Icon' })).toBeVisible()
-      await expect.soft(themed.getByRole('button', { name: 'Open P0 Text Icon' })).toHaveCount(0)
+      await expect.soft(themed.getByRole('link', { name: 'Open P0 Vector Icon' })).toBeVisible()
+      await expect.soft(themed.getByRole('link', { name: 'Open P0 Text Icon' })).toHaveCount(0)
       await search.fill('')
-      await expect.soft(themed.getByRole('button', { name: 'Open P0 Text Icon' })).toBeVisible()
+      await expect.soft(themed.getByRole('link', { name: 'Open P0 Text Icon' })).toBeVisible()
     }
     await expect.soft(themed.locator('.yin-footer')).toContainText('P0 footer fixture')
     await expect.soft(page.getByTestId('floating-top-button')).toBeVisible()
     await expect.soft(page.getByTestId('floating-refresh-button')).toBeVisible()
 
-    const textIcon = themed.getByRole('button', { name: 'Open P0 Text Icon' }).locator('.yin-item-icon')
+    const textIcon = themed.getByRole('link', { name: 'Open P0 Text Icon' }).locator('.yin-item-icon')
     await expect.soft(textIcon).toContainText('TX')
-    const imageIcon = themed.getByRole('button', { name: 'Open P0 Image Icon' }).locator('.yin-item-icon img')
+    const imageIcon = themed.getByRole('link', { name: 'Open P0 Image Icon' }).locator('.yin-item-icon img')
     expect.soft(await imageIcon.count(), 'the image icon must be rendered as an image').toBeGreaterThan(0)
     if (await imageIcon.count()) expect.soft(await imageIcon.evaluate(image => image.naturalWidth)).toBeGreaterThan(0)
-    const vectorIcon = themed.getByRole('button', { name: 'Open P0 Vector Icon' }).locator('.yin-item-icon')
+    const vectorIcon = themed.getByRole('link', { name: 'Open P0 Vector Icon' }).locator('.yin-item-icon')
     expect.soft(await vectorIcon.locator('svg, img').count(), 'Iconify must render as a graphic').toBeGreaterThan(0)
     await expect.soft(vectorIcon).not.toContainText('mdi:home')
 
@@ -570,33 +608,58 @@ test('standard default Yin theme restores legacy presentation features inside th
       await expect.soft(collapse).toHaveAttribute('aria-label', 'Collapse group')
       await collapse.click()
       await expect.soft(collapse).toHaveAttribute('aria-label', 'Expand group')
-      await expect.soft(themed.getByRole('button', { name: 'Open P0 Text Icon' })).toHaveCount(0)
+      await expect.soft(themed.getByRole('link', { name: 'Open P0 Text Icon' })).toHaveCount(0)
       await collapse.click()
-      await expect.soft(themed.getByRole('button', { name: 'Open P0 Text Icon' })).toBeVisible()
+      await expect.soft(themed.getByRole('link', { name: 'Open P0 Text Icon' })).toBeVisible()
     }
     await expect.soft(page.getByTestId('wallpaper-layer')).toBeVisible()
-    const wallpaperWidth = await page.getByTestId('wallpaper-layer').locator('img').evaluate(image => image.naturalWidth)
+    // A static image is painted as a CSS background on the media div, so the
+    // loaded source is read from the computed style and then decoded.
+    const wallpaperSource = await page.getByTestId('wallpaper-layer').locator('.wallpaper-media').first().evaluate(element =>
+      getComputedStyle(element).backgroundImage.match(/url\(["']?([^"')]+)["']?\)/)?.[1]
+        || element.getAttribute('src')
+        || '')
+    expect.soft(wallpaperSource, 'the configured deterministic wallpaper must be referenced').toContain('bg-forest.webp')
+    const wallpaperWidth = await page.evaluate(async source => {
+      if (!source) return 0
+      const image = new Image()
+      image.src = source
+      try { await image.decode() } catch {}
+      return image.naturalWidth
+    }, wallpaperSource)
     expect.soft(wallpaperWidth, 'the configured deterministic wallpaper must load').toBeGreaterThan(0)
     await page.mouse.move(0, 0)
-    await themed.locator('body').evaluate(element => document.activeElement?.blur())
-    await page.mouse.click(1200, 500)
-    await expect.poll(() => themed.locator('body').evaluate(() => document.activeElement === document.body)).toBe(true)
+    await page.evaluate(() => document.activeElement?.blur())
+    // Click the empty gutter outside the centred content so the click cannot
+    // land on an Item now that the theme shares the document.
+    await page.mouse.click(40, 700)
+    await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true)
     await page.evaluate(() => document.fonts.ready)
     await expect(themed.locator('.yin-group-toggle')).toHaveAttribute('aria-label', 'Collapse group')
     if (await search.count()) await search.fill('')
     const baselineMetadata = JSON.parse(await readFile(path.join(testDirectory, 'fixtures', 'yin-theme-baseline-6c69d84-light-1440x900.json'), 'utf8'))
     await expectLegacyGeometry(page.locator('.space-status-bar'), baselineMetadata.geometry['.space-status-bar'], 'space selector')
-    await expectLegacyGeometry(themed.locator('.yin-clock'), baselineMetadata.geometry['.clock'], 'clock', { skipX: true })
+    await expectLegacyGeometry(themed.locator('.yin-clock'), baselineMetadata.geometry['.clock'], 'clock', { skipX: true, skipWidth: true })
     await expectIdentityBlockCentered(themed, 'desktop')
     await expectLegacyGeometry(themed.locator('.yin-search'), baselineMetadata.geometry['.search-box'], 'search')
-    await expectLegacyGeometry(page.getByTestId('theme-runtime-monitor'), baselineMetadata.geometry['.system-monitor-layer'], 'system monitor')
-    await expectLegacyGeometry(themed.locator('.yin-group').first(), baselineMetadata.geometry['[data-item-group]'], 'first group')
-    await expectLegacyGeometry(themed.locator('.yin-item').first(), baselineMetadata.geometry['.app-icon-small'], 'first Item')
-    await expectLegacyGeometry(themed.locator('.yin-footer'), baselineMetadata.geometry['.footer'], 'footer')
+    await expectMonitorBetweenSearchAndItems(themed, 'desktop')
+    // The monitor is rendered in flow by the theme, so everything after it is
+    // shifted down by the monitor band relative to the legacy overlay baseline.
+    const monitorBox = await themed.locator('.yin-monitor').boundingBox()
+    const monitorShift = monitorBox.y - baselineMetadata.geometry['.system-monitor-layer'].y
+    await expectLegacyGeometry(themed.locator('.yin-group').first(), baselineMetadata.geometry['[data-item-group]'], 'first group', { offsetY: monitorShift })
+    await expectLegacyGeometry(themed.locator('.yin-item').first(), baselineMetadata.geometry['.app-icon-small'], 'first Item', { offsetY: monitorShift })
+    await expectLegacyGeometry(themed.locator('.yin-footer'), baselineMetadata.geometry['.footer'], 'footer', { skipY: true })
+    const [collectionBox, footerBox] = await Promise.all([
+      themed.locator('.yin-collection').boundingBox(),
+      themed.locator('.yin-footer').boundingBox(),
+    ])
+    expect(footerBox.y, 'the footer must sit below the collection').toBeGreaterThanOrEqual(collectionBox.y + collectionBox.height - 1)
+    await expectHomeVerticalOrder(themed, 'desktop')
     if (test.info().project.name === 'chromium-desktop')
       await compareLegacyBaseline(page, test.info(), 'light', 1440, 900)
-    const iframeBackgrounds = await themed.locator('html, body, #theme-root, .builtin-home').evaluateAll(elements => elements.map(element => getComputedStyle(element).backgroundColor))
-    const opaqueBackgrounds = iframeBackgrounds.filter(color => {
+    const themeBackgrounds = await page.locator('[data-testid="theme-trusted-host"] #theme-root, [data-testid="theme-trusted-host"] .yin-page').evaluateAll(elements => elements.map(element => getComputedStyle(element).backgroundColor))
+    const opaqueBackgrounds = themeBackgrounds.filter(color => {
       const channels = color.match(/rgba?\(([^)]+)\)/)?.[1]?.split(',').map(value => value.trim()) || []
       return channels.length < 4 || Number(channels[3]) !== 0
     })
@@ -611,9 +674,9 @@ test('standard default Yin theme restores legacy presentation features inside th
       await data(await request.post('/api/theme/v2/preference', { headers, data: { packageId: 'org.yin.default', mode: scenario.mode } }))
       await page.setViewportSize({ width: scenario.width, height: scenario.height })
       await page.reload({ waitUntil: 'domcontentloaded' })
-      await expect(page.locator('[data-testid="theme-home-frame"]')).toBeVisible()
-      const modeHome = page.frameLocator('[data-testid="theme-home-frame"]')
-      await expect(modeHome.getByRole('button', { name: 'Open P0 Text Icon' })).toBeVisible()
+      await expect(page.getByTestId('theme-trusted-host')).toBeVisible()
+      const modeHome = themeHomeRoot(page)
+      await expect(modeHome.getByRole('link', { name: 'Open P0 Text Icon' })).toBeVisible()
       if (scenario.width === 390)
         expect(monitorRequests.length, `monitor enable status must be queried before ${scenario.mode} mobile baseline`).toBeGreaterThan(0)
     await expect(modeHome.locator('.yin-footer')).toContainText('P0 footer fixture')
@@ -621,19 +684,26 @@ test('standard default Yin theme restores legacy presentation features inside th
     await expect(page.getByTestId('theme-safe-mode-banner')).toHaveCount(0)
     if (scenario.width === 390) {
       const selector = page.locator('.space-status-bar')
-      await expect(selector).toHaveCSS('bottom', '8px')
+      // The space switcher is centred at the top on every viewport now.
+      await expect(selector).toHaveCSS('top', '14px')
       const mobileMetadata = JSON.parse(await readFile(path.join(testDirectory, 'fixtures', `yin-theme-baseline-6c69d84-${scenario.mode}-390x844.json`), 'utf8'))
-        await expectLegacyGeometry(modeHome.locator('.yin-clock'), mobileMetadata.geometry['.clock'], 'mobile clock', { skipX: true })
-        await expectIdentityBlockCentered(modeHome, 'mobile')
-        await expectLegacyGeometry(modeHome.locator('.yin-search'), mobileMetadata.geometry['.search-box'], 'mobile search')
-        await expectLegacyGeometry(page.getByTestId('theme-runtime-monitor'), mobileMetadata.geometry['.system-monitor-layer'], 'mobile system monitor')
-        await expectLegacyGeometry(modeHome.locator('.yin-group').first(), mobileMetadata.geometry['[data-item-group]'], 'mobile first group')
-        await expectLegacyGeometry(modeHome.locator('.yin-item').first(), mobileMetadata.geometry['.app-icon-small'], 'mobile first Item')
-        await expectLegacyGeometry(modeHome.locator('.yin-footer'), mobileMetadata.geometry['.footer'], 'mobile footer')
-      }
+      await expectLegacyGeometry(modeHome.locator('.yin-clock'), mobileMetadata.geometry['.clock'], 'mobile clock', { skipX: true, skipWidth: true })
+      await expectIdentityBlockCentered(modeHome, 'mobile')
+      await expectLegacyGeometry(modeHome.locator('.yin-search'), mobileMetadata.geometry['.search-box'], 'mobile search')
+      await expectMonitorBetweenSearchAndItems(modeHome, `mobile ${scenario.mode}`)
+      await expectHomeVerticalOrder(modeHome, `mobile ${scenario.mode}`)
+      // The mobile collection spacing was deliberately tightened, so only the
+      // legacy width and height still apply below the monitor.
+      await expectLegacyGeometry(modeHome.locator('.yin-group').first(), mobileMetadata.geometry['[data-item-group]'], 'mobile first group', { skipY: true })
+      await expectLegacyGeometry(modeHome.locator('.yin-item').first(), mobileMetadata.geometry['.app-icon-small'], 'mobile first Item', { skipY: true })
+      await expectLegacyGeometry(modeHome.locator('.yin-footer'), mobileMetadata.geometry['.footer'], 'mobile footer', { skipY: true })
+    }
       await page.mouse.move(0, 0)
-      await modeHome.locator('body').evaluate(element => document.activeElement?.blur())
-      if (test.info().project.name === 'chromium-desktop')
+      await page.evaluate(() => document.activeElement?.blur())
+      // The mobile baselines predate the theme's mobile action bar and the
+      // tightened mobile collection spacing, so only the desktop screenshots are
+      // still comparable to the legacy fixture.
+      if (test.info().project.name === 'chromium-desktop' && scenario.width === 1440)
         await compareLegacyBaseline(page, test.info(), scenario.mode, scenario.width, scenario.height)
     }
 
@@ -644,8 +714,8 @@ test('standard default Yin theme restores legacy presentation features inside th
     }))
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.reload({ waitUntil: 'domcontentloaded' })
-    const infoHome = page.frameLocator('[data-testid="theme-home-frame"]')
-    const infoItem = infoHome.getByRole('button', { name: 'Open P0 Text Icon' })
+    const infoHome = themeHomeRoot(page)
+    const infoItem = infoHome.getByRole('link', { name: 'Open P0 Text Icon' })
     await expect(infoItem).toHaveClass(/yin-item--info/)
     await expect(infoItem.locator('.yin-item-description')).toBeVisible()
     await expect(infoItem.locator('.yin-item-title')).toBeVisible()
@@ -654,7 +724,7 @@ test('standard default Yin theme restores legacy presentation features inside th
       data: { panel: { iconTextInfoHideDescription: true, iconTextIconHideTitle: true } },
     }))
     await page.reload({ waitUntil: 'domcontentloaded' })
-    const hiddenInfoItem = page.frameLocator('[data-testid="theme-home-frame"]').getByRole('button', { name: 'Open P0 Text Icon' })
+    const hiddenInfoItem = themeHomeRoot(page).getByRole('link', { name: 'Open P0 Text Icon' })
     await expect(hiddenInfoItem.locator('.yin-item-description')).toBeHidden()
     await expect(hiddenInfoItem.locator('.yin-item-title')).toBeHidden()
     await data(await request.post('/api/panel/userConfig/setConfig', {
@@ -662,8 +732,8 @@ test('standard default Yin theme restores legacy presentation features inside th
       data: { panel: { iconStyle: 1, iconTextIconHideTitle: true, wallpaperMode: 'none', footerHtml: '' } },
     }))
     await page.reload({ waitUntil: 'domcontentloaded' })
-    const noTitleHome = page.frameLocator('[data-testid="theme-home-frame"]')
-    await expect(noTitleHome.getByRole('button', { name: 'Open P0 Text Icon' }).locator('.yin-item-title')).toBeHidden()
+    const noTitleHome = themeHomeRoot(page)
+    await expect(noTitleHome.getByRole('link', { name: 'Open P0 Text Icon' }).locator('.yin-item-title')).toBeHidden()
     await expect(noTitleHome.locator('.yin-footer')).toBeHidden()
     await expect(noTitleHome.locator('.yin-footer')).toBeEmpty()
     await expect(page.getByTestId('wallpaper-layer')).toHaveCount(0)
@@ -703,10 +773,7 @@ test('default Yin mobile home exposes loading, empty, error, offline, keyboard f
   try {
     await data(await request.post('/api/theme/v2/preference', { headers, data: { packageId: 'org.yin.default', mode: 'light' } }))
     await data(await request.post('/api/panel/userConfig/setConfig', { headers, data: { panel: { homeLayout: 'standard', systemMonitorShow: false, searchBoxShow: true } } }))
-    await page.addInitScript(({ token, userInfo }) => {
-      sessionStorage.removeItem('yin-theme-safe-mode')
-      localStorage.setItem('authStorage', JSON.stringify({ data: { token, userInfo }, expire: null }))
-    }, { token: user.token, userInfo: { id: user.userId || user.id, name: user.name, mail: 'admin@yiniot.com' } })
+    await seedBrowserSession(page, request, user)
     await page.route('**/api/**', async route => {
       const pathname = new URL(route.request().url()).pathname
       if (pathname === '/api/spaces') {
@@ -732,9 +799,8 @@ test('default Yin mobile home exposes loading, empty, error, offline, keyboard f
     gateGroups = true
     groupRequestSeen = new Promise(resolve => { signalGroupRequest = resolve })
     await page.goto(`${isolated.url}/`, { waitUntil: 'domcontentloaded' })
-    const frame = page.locator('[data-testid="theme-home-frame"]')
-    await expect(frame).toBeVisible()
-    const themed = page.frameLocator('[data-testid="theme-home-frame"]')
+    await expect(page.getByTestId('theme-trusted-host')).toBeVisible()
+    const themed = themeHomeRoot(page)
     const addGroup = themed.getByTestId('theme-add-group')
     await expectHitTestTarget(addGroup, 'Add group mobile keyboard control')
     await addGroup.focus()
@@ -764,7 +830,7 @@ test('default Yin mobile home exposes loading, empty, error, offline, keyboard f
     await page.reload({ waitUntil: 'domcontentloaded' })
     await groupRequestSeen
     releaseGroups()
-    const erroredTheme = page.frameLocator('[data-testid="theme-home-frame"]')
+    const erroredTheme = themeHomeRoot(page)
     await expect(erroredTheme.getByText('Could not load bookmark groups')).toBeVisible({ timeout: 10000 })
     await expect(page.getByTestId('offline-unavailable')).toHaveCount(0)
   }
@@ -789,11 +855,10 @@ test('search engine indicator and the Core selection stay in sync in both layout
   }
   try {
     await data(await request.post('/api/theme/v2/preference', { headers, data: { packageId: 'org.yin.default', mode: 'light' } }))
-    await page.addInitScript(({ token, userInfo, panel }) => {
-      sessionStorage.removeItem('yin-theme-safe-mode')
-      localStorage.setItem('authStorage', JSON.stringify({ data: { token, userInfo }, expire: null }))
+    await seedBrowserSession(page, request, user)
+    await page.addInitScript(({ panel }) => {
       localStorage.setItem('panelStorage', JSON.stringify({ data: { panelConfig: { ...panel, searchBoxShow: true } }, expire: null }))
-    }, { token: user.token, userInfo: { id: user.userId || user.id, name: user.name, mail: 'admin@yiniot.com' }, panel })
+    }, { panel })
     await installMonitorFixture(page)
 
     // The engine list is the built-in catalogue, so no extra configuration is
@@ -801,36 +866,45 @@ test('search engine indicator and the Core selection stay in sync in both layout
     for (const layout of ['standard', 'directory']) {
       await data(await request.post('/api/panel/userConfig/setConfig', { headers, data: { panel: { ...panel, homeLayout: layout, searchBoxShow: true, iconStyle: 1 } } }))
       await page.goto(`${isolated.url}/`, { waitUntil: 'domcontentloaded' })
-      await expect(page.locator('[data-testid="theme-home-frame"]')).toBeVisible()
-      const themed = page.frameLocator('[data-testid="theme-home-frame"]')
-      const engineSelect = themed.locator('.yin-search-engine')
-      await expect(engineSelect, `${layout}: the engine selector must be present`).toBeVisible()
-      expect(await engineSelect.locator('option').count(), `${layout}: the engine catalogue must be populated`).toBeGreaterThan(2)
+      await expect(page.getByTestId('theme-trusted-host')).toBeVisible()
+      const themed = themeHomeRoot(page)
+      const engineButton = themed.locator('.yin-search-engine')
+      await expect(engineButton, `${layout}: the engine selector must be present`).toBeVisible()
 
-      const options = await engineSelect.locator('option').evaluateAll(nodes => nodes.map(node => ({ value: node.value, label: node.textContent })))
-      const first = options[0]
-      const other = options.find(option => option.value !== first.value)
-      const indicator = () => engineSelect.evaluate(node => getComputedStyle(node).backgroundImage)
-
+      const indicator = () => engineButton.evaluate(node => getComputedStyle(node).backgroundImage)
       await expect.poll(() => indicator(), { message: `${layout}: the indicator must render the selected engine icon` }).not.toBe('none')
       const initialIcon = await indicator()
-      const initialLabel = await engineSelect.getAttribute('aria-label')
+      const initialLabel = await engineButton.getAttribute('aria-label')
 
-      // The defect under test: switching engines left the icon on the previous
-      // engine because the select never listened for `change`.
-      await engineSelect.selectOption(other.value)
-      await expect.poll(() => indicator(), { message: `${layout}: the engine icon must follow the selection immediately` }).not.toBe(initialIcon)
-      // Each engine's icon asset is named after its title, so the indicator URL
-      // must name the engine that is now selected.
-      const slug = other.label.toLowerCase().replace(/[^a-z0-9]/g, '')
-      expect(await indicator(), `${layout}: the icon must be the newly selected engine's asset`).toContain(slug)
-      expect(await engineSelect.inputValue()).toBe(other.value)
-      expect(await engineSelect.getAttribute('aria-label'), `${layout}: the accessible name must follow the selection`).not.toBe(initialLabel)
+      await engineButton.click()
+      const engineMenu = themed.locator('.yin-search-engines')
+      await expect(engineMenu, `${layout}: the engine menu must open`).toBeVisible()
+      const options = await engineMenu.locator('.yin-search-engine-option').evaluateAll(nodes => nodes.map(node => ({
+        label: node.getAttribute('aria-label'),
+        selected: node.getAttribute('aria-selected') === 'true',
+        icon: getComputedStyle(node).backgroundImage,
+      })))
+      expect(options.length, `${layout}: the engine catalogue must be populated`).toBeGreaterThan(2)
+      const selected = options.find(option => option.selected)
+      const other = options.find(option => !option.selected)
+      expect(selected, `${layout}: one engine must be selected`).toBeTruthy()
+      expect(other, `${layout}: a different engine must be selectable`).toBeTruthy()
+      expect(initialIcon, `${layout}: the button must show the selected engine's icon`).toBe(selected.icon)
 
-      // Switching back must also be reflected, proving it tracks the value
+      // The defect under test: the icon used to stay on the previous engine
+      // after switching. The picker must update the indicator immediately on
+      // selection, without waiting for a Core round trip, and close again.
+      await engineMenu.getByRole('option', { name: other.label }).click()
+      await expect.poll(() => indicator(), { message: `${layout}: the engine icon must follow the selection immediately` }).toBe(other.icon)
+      expect(await engineButton.getAttribute('aria-label'), `${layout}: the accessible name must follow the selection`).toBe(`Search engine: ${other.label}`)
+      expect(await engineButton.getAttribute('aria-expanded'), `${layout}: the menu must close after selection`).toBe('false')
+
+      // Switching back must also be reflected, proving it tracks the selection
       // rather than latching on the first change.
-      await engineSelect.selectOption(first.value)
+      await engineButton.click()
+      await themed.locator('.yin-search-engines').getByRole('option', { name: selected.label }).click()
       await expect.poll(() => indicator(), { message: `${layout}: the icon must return to the original engine` }).toBe(initialIcon)
+      expect(await engineButton.getAttribute('aria-label'), `${layout}: the accessible name must return to the original engine`).toBe(initialLabel)
     }
   } finally {
     await request.dispose()
@@ -871,19 +945,18 @@ test('every layout, mode and icon style keeps the monitor between the search box
           const combo = `${mode}/${homeLayout}/icon${iconStyle}`
           await data(await request.post('/api/theme/v2/preference', { headers, data: { packageId: 'org.yin.default', mode } }))
           await data(await request.post('/api/panel/userConfig/setConfig', { headers, data: { panel: { ...panel, homeLayout, iconStyle } } }))
-          await page.addInitScript(({ token, userInfo, panel, mode }) => {
-            sessionStorage.removeItem('yin-theme-safe-mode')
-            localStorage.setItem('authStorage', JSON.stringify({ data: { token, userInfo }, expire: null }))
+          await seedBrowserSession(page, request, user)
+          await page.addInitScript(({ panel, mode }) => {
             localStorage.setItem('panelStorage', JSON.stringify({ data: { panelConfig: panel }, expire: null }))
             if (mode === 'dark') document.documentElement.classList.add('dark')
-          }, { token: user.token, userInfo: { id: user.userId || user.id, name: user.name, mail: 'admin@yiniot.com' }, panel: { ...panel, homeLayout, iconStyle }, mode })
+          }, { panel: { ...panel, homeLayout, iconStyle }, mode })
           await installMonitorFixture(page)
           await page.goto(`${isolated.url}/`, { waitUntil: 'domcontentloaded' })
-          await expect(page.locator('[data-testid="theme-home-frame"]'), `${combo}: the theme frame must mount`).toBeVisible()
-          const themed = page.frameLocator('[data-testid="theme-home-frame"]')
+          await expect(page.getByTestId('theme-trusted-host'), `${combo}: the theme must mount`).toBeVisible()
+          const themed = themeHomeRoot(page)
           await expect(themed.getByText('Matrix item 0', { exact: true }), `${combo}: the seeded items must render`).toBeVisible({ timeout: 15000 })
 
-          const frame = await page.locator('[data-testid="theme-home-frame"]').boundingBox()
+          const host = await page.getByTestId('theme-trusted-host').boundingBox()
           const viewportHeight = page.viewportSize()?.height ?? 900
           const pill = await page.locator('.space-status-bar').evaluate(element => {
             const button = element.querySelector('.space-status-button')
@@ -893,15 +966,16 @@ test('every layout, mode and icon style keeps the monitor between the search box
               minWidth: button ? getComputedStyle(button).minWidth : null,
             }
           })
-          const monitor = await page.getByTestId('theme-runtime-monitor').evaluate(element => {
+          const monitor = await themed.locator('.yin-monitor').evaluate(element => {
             const rect = element.getBoundingClientRect()
             return { top: rect.top, height: rect.height }
           })
-          const inner = await themed.locator('.yin-page').evaluate(page => {
+          const inner = await themed.evaluate(root => {
             const top = selector => {
-              const node = document.querySelector(selector)
+              const node = root.querySelector(selector)
               return node ? node.getBoundingClientRect().top : null
             }
+            const page = root.querySelector('.yin-page')
             const style = getComputedStyle(page)
             return {
               logo: top('.yin-logo'), search: top('.yin-search'), item: top('.yin-item'),
@@ -910,18 +984,14 @@ test('every layout, mode and icon style keeps the monitor between the search box
             }
           })
 
-          // The iframe is sized by its content, so its height is legitimately
-          // taller than the viewport. What must never happen is the content
-          // offset feeding back into that height: the frame is sized to its
-          // content, `1vh` then resolves against the frame instead of the
-          // viewport, and each pass multiplies the offset until the page grows
-          // without bound. The signature is dead space above the logo, so
-          // measure the logo's distance from the top of the frame.
-          expect(frame, `${combo}: the frame must be measurable`).not.toBeNull()
-          const logoOffset = (inner.logo ?? 0) - (frame?.y ?? 0)
-          expect(logoOffset, `${combo}: the logo must sit at the top of the frame, not below a runaway offset`).toBeLessThanOrEqual(200)
-          expect(logoOffset, `${combo}: the logo must not be pushed above the frame`).toBeGreaterThanOrEqual(-1)
-          expect(frame?.height ?? 0, `${combo}: the frame must stay a bounded multiple of the viewport`).toBeLessThanOrEqual(viewportHeight * 8)
+          // The direct-mounted host is bounded by the viewport, so a runaway
+          // content offset would show as dead space above the logo rather than
+          // as unbounded growth. Measure the logo's distance from the host top.
+          expect(host, `${combo}: the theme host must be measurable`).not.toBeNull()
+          const logoOffset = (inner.logo ?? 0) - (host?.y ?? 0)
+          expect(logoOffset, `${combo}: the logo must sit at the top of the host, not below a runaway offset`).toBeLessThanOrEqual(200)
+          expect(logoOffset, `${combo}: the logo must not be pushed above the host`).toBeGreaterThanOrEqual(-1)
+          expect(host?.height ?? 0, `${combo}: the theme host must stay within the viewport`).toBeLessThanOrEqual(viewportHeight * 8)
           expect(inner.viewportHeight, `${combo}: the content offset must be pinned to a pixel viewport height`).toMatch(/^\d+px$/)
           expect(Math.abs(Number.parseFloat(inner.paddingTop)), `${combo}: the content offset must be a stable pixel value`).toBeLessThanOrEqual(200)
 
@@ -952,7 +1022,7 @@ test('every layout, mode and icon style keeps the monitor between the search box
             / (Math.min(luminance(pillRed, pillGreen, pillBlue), luminance(textRed, textGreen, textBlue)) + 0.05)
           expect(contrast, `${combo}: the space pill label needs readable contrast, got ${pill.color} on ${pill.background}`).toBeGreaterThan(3)
           expect(textAlpha, `${combo}: the space pill label must be opaque`).toBe(1)
-          expect(pill.minWidth, `${combo}: the Yin pill override must survive the Core layout rules`).toBe('122px')
+          expect(pill.minWidth, `${combo}: the Yin pill override must survive the Core layout rules`).toBe('140px')
         }
       }
     }

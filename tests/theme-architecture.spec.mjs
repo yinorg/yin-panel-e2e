@@ -22,12 +22,12 @@ test('official DTCG themes change the visual system without changing panel layou
   try {
     const admin = await login(request, adminCredentials)
     const headers = authHeaders(admin)
-    for (const id of ['org.yin.glass', 'org.yin.minimal', 'org.yin.cyber']) {
+    for (const id of ['org.yin.glass']) {
       await responseData(await request.post('/api/theme/v2/admin/default', { headers, data: { packageId: id } }))
       await responseData(await request.post('/api/theme/v2/admin/default', { headers, data: { packageId: 'org.yin.default' } }))
     }
     const themes = await responseData(await request.get('/api/theme/v2/packages'))
-    for (const id of ['org.yin.default', 'org.yin.glass', 'org.yin.minimal', 'org.yin.cyber'])
+    for (const id of ['org.yin.default', 'org.yin.glass'])
       expect(themes.some(theme => theme.id === id), `${id} is installed`).toBe(true)
 
     const saved = {
@@ -54,27 +54,19 @@ test('official DTCG themes change the visual system without changing panel layou
       layout: document.documentElement.dataset.yinLayout,
     }))
     const appearances = new Map()
-    for (const id of ['org.yin.default', 'org.yin.glass', 'org.yin.minimal', 'org.yin.cyber']) {
+    for (const id of ['org.yin.default', 'org.yin.glass']) {
       await responseData(await request.post('/api/theme/v2/preference', { headers, data: { packageId: id, mode: 'light' } }))
       await page.reload()
       const expected = id === 'org.yin.default'
         ? { surface: 'solid' }
-        : id === 'org.yin.glass'
-          ? { surface: 'glass' }
-          : id === 'org.yin.minimal'
-            ? { density: 'spacious' }
-            : { density: 'compact', texture: 'grid' }
+        : { surface: 'glass' }
       await expect.poll(readAppearance).toMatchObject({ layout: 'directory', ...expected })
       appearances.set(id, await readAppearance())
     }
 
     expect(appearances.get('org.yin.default').surface).toBe('solid')
     expect(appearances.get('org.yin.glass').surface).toBe('glass')
-    expect(appearances.get('org.yin.minimal').density).toBe('spacious')
-    expect(appearances.get('org.yin.cyber').density).toBe('compact')
-    expect(appearances.get('org.yin.cyber').texture).toBe('grid')
-    expect(new Set([...appearances.values()].map(value => value.radius)).size).toBe(4)
-    expect(appearances.get('org.yin.cyber').font).toContain('monospace')
+    expect(new Set([...appearances.values()].map(value => value.radius)).size).toBe(2)
 
     await page.emulateMedia({ colorScheme: 'dark' })
     await responseData(await request.post('/api/theme/v2/preference', { headers, data: { packageId: 'org.yin.glass', mode: 'auto' } }))

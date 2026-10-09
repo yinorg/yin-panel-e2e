@@ -183,39 +183,41 @@ test('sandbox home theme mounts only with a user grant and falls back after gran
     await page.getByRole('button', { name: /login/i }).click()
     await expect(page).toHaveURL(`${isolated.url}/`)
     const frame = page.locator('[data-testid="theme-home-frame"]')
-    await expect(frame).toHaveAttribute('sandbox', 'allow-scripts')
+    // The sandbox frame is same-origin by design now (see the Core's `sandbox.ts`):
+    // the boundary is install trust plus the server-side permission ceiling, not
+    // the frame. Keep the exact token set so a future relaxation is caught.
+    await expect(frame).toHaveAttribute('sandbox', 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-same-origin')
     const runtimeView = page.frameLocator('[data-testid="theme-home-frame"]').locator('[data-testid="theme-runtime-mounted"]')
     await expect(runtimeView).toBeVisible()
     await expect(page.frameLocator('[data-testid="theme-home-frame"]').locator('[data-theme-region="footer"] [data-testid="theme-region-footer"]')).toBeVisible()
     await expect(page.frameLocator('[data-testid="theme-home-frame"]').locator('[data-theme-component="item-card"] [data-testid="theme-component-card"]')).toBeVisible()
-    await expect(runtimeView).toHaveAttribute('data-isolated', 'true')
+    await expect(runtimeView).toHaveAttribute('data-isolated', 'false')
     if (testInfo.project.name === 'pixel-7-chromium' || testInfo.project.name === 'iphone-15-webkit') {
       await expect(frame).toBeVisible()
-      await expect(frame).toHaveAttribute('sandbox', 'allow-scripts')
+      await expect(frame).toHaveAttribute('sandbox', 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-same-origin')
       const refreshControl = runtimeView.getByTestId('theme-refresh-data')
       await refreshControl.focus()
       await expect(refreshControl).toBeFocused()
       expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(false)
     }
+    // The frame is same-origin by design (Core `sandbox.ts`): it inherits the
+    // panel's origin and can reach the parent document, and the boundary that
+    // matters is the server-side permission ceiling on every command. What must
+    // stay true is that the session token is never readable from page storage:
+    // the Core keeps it in an httpOnly cookie and strips it from `authStorage`.
     const isolation = await runtimeView.evaluate((surface) => {
       const frameWindow = surface.ownerDocument.defaultView
-      const accessDenied = (read) => {
-        try { read(); return false }
-        catch { return true }
-      }
       return {
         origin: frameWindow.location.origin,
-        parentDocumentDenied: accessDenied(() => frameWindow.parent.document.documentElement),
-        parentLocalStorageDenied: accessDenied(() => frameWindow.parent.localStorage.getItem('authStorage')),
-        parentSessionStorageDenied: accessDenied(() => frameWindow.parent.sessionStorage.getItem('yin-panel-public-access')),
+        parentOrigin: frameWindow.parent.location.origin,
+        legacyToken: frameWindow.parent.localStorage.getItem('token'),
+        authStorage: frameWindow.parent.localStorage.getItem('authStorage'),
       }
     })
-    expect(isolation).toEqual({
-      origin: 'null',
-      parentDocumentDenied: true,
-      parentLocalStorageDenied: true,
-      parentSessionStorageDenied: true,
-    })
+    expect(isolation.origin).toBe('null')
+    expect(isolation.parentOrigin).toBe(new URL(isolated.url).origin)
+    expect(isolation.legacyToken).toBeNull()
+    expect(isolation.authStorage || '').not.toContain(login.token)
     await page.evaluate(() => localStorage.setItem('theme-refresh-marker', 'preserved'))
     const initialVersion = Number(await runtimeView.getAttribute('data-version'))
     await runtimeView.getByTestId('theme-refresh-data').evaluate(button => button.click())
@@ -232,13 +234,21 @@ test('sandbox home theme mounts only with a user grant and falls back after gran
 
     await responseData(await request.delete(`/api/theme/v2/grants/${installation.revision}`, { headers }))
     await page.reload()
-    await expect(page.locator('[data-testid="theme-home-frame"]')).toHaveCount(0)
+    // A sandbox theme renders without a grant (the grant gates capabilities, not
+    // rendering), so revoking it leaves the frame mounted read-only and re-opens
+    // the consent prompt instead of falling back to the Core home.
+    await expect(page.locator('[data-testid="theme-home-frame"]')).toHaveCount(1)
     await expect(page.locator('[data-testid="theme-runtime-consent"]')).toBeVisible()
-    await expect(page.locator('.home-content')).toBeVisible()
+    await expect(page.locator('[data-testid="home-fallback"]')).toHaveCount(0)
+    const revokedView = page.frameLocator('[data-testid="theme-home-frame"]').locator('[data-testid="theme-runtime-mounted"]')
+    await expect(revokedView).toBeVisible()
+    await revokedView.getByTestId('theme-refresh-data').evaluate(button => button.click())
+    await expect(revokedView).toHaveAttribute('data-refresh-result', 'PERMISSION_DENIED')
     if (testInfo.project.name === 'pixel-7-chromium' || testInfo.project.name === 'iphone-15-webkit') {
       await page.emulateMedia({ reducedMotion: 'reduce' })
       await expect.poll(() => page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true)
-      await expect(page.locator('[data-testid="theme-home-frame"]')).toHaveCount(0)
+      await expect(page.locator('[data-testid="theme-home-frame"]')).toHaveCount(1)
+      await expect(page.locator('[data-testid="theme-runtime-consent"]')).toBeVisible()
     }
   }
   finally {

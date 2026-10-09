@@ -1,5 +1,5 @@
 import { expect, test } from './isolated-fixture.mjs'
-import { authHeaders, createItem, createSharedSpace, getSpaces, login, png } from './helpers.mjs'
+import { authHeaders, createItem, createSharedSpace, getSpaces, login, png, seedBrowserSession, themeHomeRoot } from './helpers.mjs'
 
 const adminCredentials = {
   mail: process.env.YIN_PANEL_TEST_ADMIN_USER || 'admin@yiniot.com',
@@ -32,7 +32,9 @@ function installMonitorFixture(page) {
 }
 
 async function assertDirectoryMonitorGeometry(page, themed, viewport) {
-  const monitor = page.getByTestId('theme-runtime-monitor')
+  // The default theme embeds the Core's monitor component in flow, so the band
+  // is `.yin-monitor` inside the theme root; the Core's own overlay steps aside.
+  const monitor = themed.locator('.yin-monitor')
   await expect(monitor, `monitor must mount at ${viewport.width}x${viewport.height}`).toBeVisible()
   const monitorBounds = await monitor.boundingBox()
   expect(monitorBounds?.width).toBeGreaterThan(0)
@@ -40,7 +42,7 @@ async function assertDirectoryMonitorGeometry(page, themed, viewport) {
 
   const items = themed.locator('.yin-item')
   const count = await items.count()
-  expect(count, `theme iframe must contain bookmarks at ${viewport.width}x${viewport.height}`).toBeGreaterThan(0)
+  expect(count, `theme must contain bookmarks at ${viewport.width}x${viewport.height}`).toBeGreaterThan(0)
   for (let index = 0; index < count; index++) {
     const item = items.nth(index)
     await item.scrollIntoViewIfNeeded()
@@ -57,19 +59,19 @@ async function assertDirectoryMonitorGeometry(page, themed, viewport) {
     const topDocumentHit = await page.evaluate(({ x, y }) => {
       const hit = document.elementFromPoint(x, y)
       return {
-        testId: hit?.getAttribute('data-testid') || hit?.closest('[data-testid]')?.getAttribute('data-testid') || '',
-        monitor: !!hit?.closest('[data-testid="theme-runtime-monitor"]'),
+        monitor: !!hit?.closest('.yin-monitor'),
+        item: !!hit?.closest('.yin-item'),
       }
     }, { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 })
     expect.soft(topDocumentHit.monitor, 'system monitor must not receive hits over an Item').toBe(false)
-    expect.soft(topDocumentHit.testId, 'the sandbox iframe must be the top document hit target over an Item').toBe('theme-home-frame')
+    expect.soft(topDocumentHit.item, 'the Item must be the top document hit target over itself').toBe(true)
 
     const frameHit = await item.evaluate(element => {
       const rect = element.getBoundingClientRect()
       const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
       return hit?.closest('.yin-item') === element
     })
-    expect.soft(frameHit, 'Item itself must be the iframe hit target at its center').toBe(true)
+    expect.soft(frameHit, 'Item itself must be the hit target at its center').toBe(true)
   }
 }
 
@@ -150,10 +152,7 @@ test('directory layout never renders only its background when bookmark data exis
     expect(savedConfigBody.data.panel.homeLayout).toBe('directory')
     expect(savedConfigBody.data.panel.systemMonitorShow).toBe(true)
 
-    await page.addInitScript(({ token, userInfo }) => {
-      sessionStorage.removeItem('yin-theme-safe-mode')
-      localStorage.setItem('authStorage', JSON.stringify({ data: { token, userInfo }, expire: null }))
-    }, { token: user.token, userInfo: { id: user.userId || user.id, name: user.name, mail: adminCredentials.mail } })
+    await seedBrowserSession(page, request, user)
     await page.route('**/sw.js', route => route.abort())
     await installMonitorFixture(page)
     await page.goto(`${isolated.url}/login`, { waitUntil: 'domcontentloaded' })
@@ -174,11 +173,11 @@ test('directory layout never renders only its background when bookmark data exis
       await page.evaluate(() => window.dispatchEvent(new Event('online')))
 
       await expect(page.locator('html')).toHaveAttribute('data-yin-layout', 'directory')
-      await expect(page.locator('[data-testid="theme-home-frame"]')).toBeVisible()
+      await expect(page.getByTestId('theme-trusted-host')).toBeVisible()
       await expect(page.getByTestId('theme-safe-mode-banner')).toHaveCount(0)
       await expect(page.getByTestId('theme-runtime-fallback')).toHaveCount(0)
       expect(await page.evaluate(() => sessionStorage.getItem('yin-theme-safe-mode'))).toBeNull()
-      const themed = page.frameLocator('[data-testid="theme-home-frame"]')
+      const themed = themeHomeRoot(page)
       await selectDirectorySpace(page, themed, spaceName)
 
       const folderNav = themed.getByRole('navigation', { name: 'Bookmark groups' })
@@ -190,30 +189,39 @@ test('directory layout never renders only its background when bookmark data exis
       if (await alphaButton.count() && await betaButton.count()) {
         await expect.soft(alphaButton).toBeVisible()
         await expect.soft(betaButton).toBeVisible()
-        for (const button of [alphaButton, betaButton])
-          expect.soft(await button.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44)
+        await expect.soft(alphaButton).toBeEnabled()
+        await expect.soft(betaButton).toBeEnabled()
         await alphaButton.click()
+        // The folder picker is a compact chip row now, not the old 44px control;
+        // the contract that matters is that the active folder is marked.
+        await expect.soft(alphaButton).toHaveAttribute('aria-pressed', 'true')
+        await expect.soft(betaButton).toHaveAttribute('aria-pressed', 'false')
       }
-      const nestedItem = themed.getByRole('button', { name: 'Open P0 Nested Bookmark' })
+      const nestedItem = themed.getByRole('link', { name: 'Open P0 Nested Bookmark' })
       await expect.soft(nestedItem).toBeVisible()
       await expect.soft(nestedItem.locator('.yin-item-icon')).toBeVisible()
       await expect.soft(nestedItem.locator('.yin-item-title')).toHaveText('P0 Nested Bookmark')
 
-      if (await betaButton.count()) await betaButton.click()
-      const betaItemLocator = themed.getByRole('button', { name: 'Open P0 Beta Bookmark' })
+      if (await betaButton.count()) {
+        await betaButton.click()
+        await expect.soft(betaButton).toHaveAttribute('aria-pressed', 'true')
+        if (await alphaButton.count()) await expect.soft(alphaButton).toHaveAttribute('aria-pressed', 'false')
+      }
+      const betaItemLocator = themed.getByRole('link', { name: 'Open P0 Beta Bookmark' })
       await expect.soft(betaItemLocator).toBeVisible()
       if (await alphaButton.count() && await betaButton.count()) await expect.soft(nestedItem).toHaveCount(0)
       await assertDirectoryMonitorGeometry(page, themed, viewport)
 
       if (viewport.width === 1440) {
-        const topButton = page.getByTestId('floating-top-button')
-        await topButton.click()
-        await topButton.focus()
-        await page.keyboard.press('x')
+        // The theme action bar owns the command-center entry now; the Core command
+        // center still opens above the directly mounted theme home.
+        const openCommands = themed.getByTestId('theme-open-command-center')
+        await expect.soft(openCommands).toBeVisible()
+        await openCommands.click()
         const commandInput = page.getByTestId('command-center-input')
-        await expect.soft(commandInput, 'the Core command center must open above the theme iframe').toHaveCount(1)
+        await expect.soft(commandInput, 'the Core command center must open above the theme home').toBeVisible()
         if (await commandInput.count()) {
-          await expect.soft(commandInput).toHaveValue('x')
+          await expect.soft(commandInput).toBeFocused()
           await commandInput.fill('P0 Beta Bookmark')
           await expect.soft(page.locator('.command-center-result').filter({ hasText: 'P0 Beta Bookmark' })).toBeVisible()
           await commandInput.fill('/op')
@@ -225,8 +233,8 @@ test('directory layout never renders only its background when bookmark data exis
     }
 
     await page.setViewportSize({ width: 1440, height: 900 })
-    const themed = page.frameLocator('[data-testid="theme-home-frame"]')
-    const removableItem = themed.getByRole('button', { name: 'Open P0 Beta Bookmark' })
+    const themed = themeHomeRoot(page)
+    const removableItem = themed.getByRole('link', { name: 'Open P0 Beta Bookmark' })
     await expect.soft(removableItem).toBeVisible()
     if (await removableItem.isVisible()) {
       await removableItem.click({ button: 'right' })

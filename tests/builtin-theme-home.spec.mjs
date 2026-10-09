@@ -1,5 +1,5 @@
 import { expect, test } from './isolated-fixture.mjs'
-import { authHeaders, createItem, createSpace, deleteItem, login } from './helpers.mjs'
+import { authHeaders, createItem, createSpace, deleteItem, login, themeHomeRoot } from './helpers.mjs'
 
 const adminCredentials = {
   mail: process.env.YIN_PANEL_TEST_ADMIN_USER || 'admin@yiniot.com',
@@ -39,7 +39,7 @@ test('all built-in theme home views render real items and expose immutable packa
     itemId = item.id
 
     const packages = await responseData(await request.get('/api/theme/v2/packages'))
-    const ids = ['org.yin.default', 'org.yin.glass', 'org.yin.minimal', 'org.yin.cyber']
+    const ids = ['org.yin.default', 'org.yin.glass']
     const selected = ids.map(id => {
       const pkg = packages.find(entry => entry.id === id)
       expect(pkg, `built-in package ${id} is missing`).toBeTruthy()
@@ -57,7 +57,7 @@ test('all built-in theme home views render real items and expose immutable packa
       expect(detail.manifest.entrypoints.styles).toEqual(['styles/home.css'])
       const grant = await responseData(await request.get(`/api/theme/v2/grants/${pkg.revision}`, { headers }))
       const expectedPermissions = pkg.id === 'org.yin.default'
-        ? ['spaces.read', 'groups.read', 'items.read', 'items.write', 'groups.write']
+        ? ['spaces.read', 'groups.read', 'items.read', 'items.write', 'groups.write', 'preferences.read', 'preferences.write', 'diagnostics.report']
         : ['spaces.read', 'groups.read', 'items.read']
       expect(grant).toMatchObject({ granted: true, permissions: expectedPermissions })
       for (const asset of detail.manifest.resources) {
@@ -67,10 +67,15 @@ test('all built-in theme home views render real items and expose immutable packa
         expect(body.length).toBeGreaterThan(0)
         if (asset.path.endsWith('.css')) {
           const css = body.toString().replace(/\s+/g, '')
-          expect(css).toContain(pkg.id === 'org.yin.default' ? '.yin-theme-root' : '.builtin-home')
-          if (pkg.id === 'org.yin.glass') expect(css).toContain('backdrop-filter')
-          if (pkg.id === 'org.yin.minimal') expect(css).toContain('flex-direction:column;gap:0')
-          if (pkg.id === 'org.yin.cyber') expect(css).toContain('background-size:28px28px')
+          if (pkg.id === 'org.yin.default') {
+            expect(css).toContain('.yin-theme-root')
+            expect(css).toContain('.yin-monitor')
+            expect(css).toContain('.yin-masthead')
+          }
+          else {
+            expect(css).toContain('.builtin-home')
+            if (pkg.id === 'org.yin.glass') expect(css).toContain('backdrop-filter')
+          }
         }
       }
     }
@@ -90,11 +95,12 @@ test('all built-in theme home views render real items and expose immutable packa
         data: { packageId: pkg.id, mode: 'light' },
       }))
       await page.reload()
-      const frame = page.locator('[data-testid="theme-home-frame"]')
-      await expect(frame, `${pkg.name} should mount its home view`).toBeVisible()
-      const themedHome = page.frameLocator('[data-testid="theme-home-frame"]')
+      const host = page.getByTestId('theme-trusted-host')
+      await expect(host, `${pkg.name} should mount its home view`).toBeVisible()
+      const themedHome = themeHomeRoot(page)
+      await expect(themedHome).toHaveCount(1)
       if (pkg.id === 'org.yin.default') {
-        const itemButton = themedHome.getByRole('button', { name: 'Open Theme E2E Item' })
+        const itemButton = themedHome.getByRole('link', { name: 'Open Theme E2E Item' })
         await expect(itemButton).toBeVisible()
         await expect(themedHome.locator('.yin-item-title')).toHaveText('Theme E2E Item')
         await expect(themedHome.locator('.yin-group-title').filter({ hasText: group.title })).toBeVisible()

@@ -21,6 +21,32 @@ export function authHeaders(user) { return { Authorization: `Bearer ${user.token
 
 export async function loginAs(request, credentials) { return login(request, credentials) }
 
+/**
+ * The light-DOM mount point of a directly mounted (built-in) theme. The built-in
+ * themes render same-origin under the trusted host instead of in the legacy
+ * sandbox frame, so the theme DOM is a normal descendant of the Core page.
+ */
+export function themeHomeRoot(page) {
+  return page.locator('[data-testid="theme-trusted-host"] #theme-root')
+}
+
+/**
+ * Seed a browser page with the current Core session model: `/api/login` puts the
+ * session token in an httpOnly cookie, and localStorage only records the user and
+ * the logged-in flag. Copying the API context's cookie jar keeps the page and the
+ * request context on the same session; writing the legacy `token` into
+ * localStorage would instead be treated as a stale session and force a re-login.
+ */
+export async function seedBrowserSession(page, request, user) {
+  const { cookies } = await request.storageState()
+  if (cookies.length) await page.context().addCookies(cookies)
+  const userInfo = { id: user.userId || user.id, name: user.name, mail: user.mail, role: user.role }
+  await page.addInitScript(({ userInfo }) => {
+    sessionStorage.removeItem('yin-theme-safe-mode')
+    localStorage.setItem('authStorage', JSON.stringify({ data: { userInfo, loggedIn: true }, expire: null }))
+  }, { userInfo })
+}
+
 async function json(request, method, url, options = {}) {
   const response = await request[method](url, options)
   const body = await response.json().catch(() => ({}))

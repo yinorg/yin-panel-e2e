@@ -70,7 +70,10 @@ test('author CLI previews its generated package against isolated Core and render
 
     const frame = page.locator('[data-testid="theme-home-frame"]')
     await expect(frame, runtimeErrors.join('\n')).toBeVisible()
-    await expect(frame).toHaveAttribute('sandbox', 'allow-scripts')
+    // The sandbox frame is same-origin by design now (see the Core's `sandbox.ts`):
+    // the boundary is install trust plus the server-side permission ceiling, not
+    // the frame. Keep the exact token set so a future relaxation is caught.
+    await expect(frame).toHaveAttribute('sandbox', 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-same-origin')
     const themedHome = page.frameLocator('[data-testid="theme-home-frame"]')
     await expect(themedHome.locator('.theme-home')).toBeVisible()
     await expect(themedHome.locator('.theme-item')).toHaveText('CLI Preview Item')
