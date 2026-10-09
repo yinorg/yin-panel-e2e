@@ -644,9 +644,11 @@ test('standard default Yin theme restores legacy presentation features inside th
     await expectLegacyGeometry(themed.locator('.yin-search'), baselineMetadata.geometry['.search-box'], 'search')
     await expectMonitorBetweenSearchAndItems(themed, 'desktop')
     // The monitor is rendered in flow by the theme, so everything after it is
-    // shifted down by the monitor band relative to the legacy overlay baseline.
+    // shifted down by the monitor band's own bottom edge relative to the legacy
+    // overlay baseline (which only accounts for position, not height).
     const monitorBox = await themed.locator('.yin-monitor').boundingBox()
-    const monitorShift = monitorBox.y - baselineMetadata.geometry['.system-monitor-layer'].y
+    const baselineMonitor = baselineMetadata.geometry['.system-monitor-layer']
+    const monitorShift = (monitorBox.y + monitorBox.height) - (baselineMonitor.y + baselineMonitor.height)
     await expectLegacyGeometry(themed.locator('.yin-group').first(), baselineMetadata.geometry['[data-item-group]'], 'first group', { offsetY: monitorShift })
     await expectLegacyGeometry(themed.locator('.yin-item').first(), baselineMetadata.geometry['.app-icon-small'], 'first Item', { offsetY: monitorShift })
     await expectLegacyGeometry(themed.locator('.yin-footer'), baselineMetadata.geometry['.footer'], 'footer', { skipY: true })
