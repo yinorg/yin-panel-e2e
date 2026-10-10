@@ -10,6 +10,9 @@
     "test:pwa": "playwright test --config=playwright.pwa.config.mjs --fail-on-flaky-tests",
     "perf:smoke": "k6 run perf/smoke.js",
     "perf:load": "k6 run perf/load.js",
+    "perf:sweep": "node perf/sweep.mjs",
+    "perf:matrix": "bash perf/run-matrix.sh",
+    "perf:summary": "node perf/summarize.mjs",
     "provision-member": "node scripts/provision-member.mjs"
   },
   "devDependencies": {
