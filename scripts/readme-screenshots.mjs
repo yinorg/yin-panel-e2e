@@ -11,7 +11,7 @@
 //   node scripts/readme-screenshots.mjs
 //
 // Env:
-//   README_SHOTS_DIR    output directory (default: ../Yin-Panel/doc/images)
+//   README_SHOTS_DIR    output directory (default: ../Yin-Panel/docs/images)
 //   README_SHOTS_MODES  comma-separated modes to capture (default: light,dark)
 //   YIN_PANEL_ENV_FILE  env file to load (default: ./.env.local)
 //
@@ -32,7 +32,7 @@ try { process.loadEnvFile(envFile) } catch (error) { if (error.code !== 'ENOENT'
 for (const name of ['NO_PROXY', 'no_proxy'])
   process.env[name] = [...new Set(`${process.env[name] || ''},localhost,127.0.0.1,::1`.split(',').filter(Boolean))].join(',')
 
-const outDir = process.env.README_SHOTS_DIR || path.resolve(repoRoot, '../Yin-Panel/doc/images')
+const outDir = process.env.README_SHOTS_DIR || path.resolve(repoRoot, '../Yin-Panel/docs/images')
 const modes = (process.env.README_SHOTS_MODES || 'light,dark').split(',').map(value => value.trim()).filter(Boolean)
 const viewport = { width: 1440, height: 900 }
 
