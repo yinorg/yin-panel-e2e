@@ -1,6 +1,6 @@
 # Testes de aceitação ponta a ponta do Yin-Panel
 
-[English](../../README.md) | [简体中文](../zh-CN/README.md) | [繁體中文](../zh-TW/README.md) | [日本語](../ja-JP/README.md) | [한국어](../ko-KR/README.md) | [Deutsch](../de-DE/README.md) | [Français](../fr-FR/README.md) | [Español](../es-ES/README.md) | **Português (Brasil)** | [Русский](../ru-RU/README.md)
+[English](../../README.md) | [简体中文](../zh-CN/README.md) | [繁體中文](../zh-TW/README.md) | [日本語](../ja-JP/README.md) | [한국어](../ko-KR/README.md) | [Deutsch](../de-DE/README.md) | [Français](../fr-FR/README.md) | [Español](../es-ES/README.md) | **Português (Brasil)** | [Русский](../ru-RU/README.md) | [Bahasa Indonesia](../id-ID/README.md) | [Türkçe](../tr-TR/README.md) | [Polski](../pl-PL/README.md) | [Italiano](../it-IT/README.md) | [Nederlands](../nl-NL/README.md) | [हिन्दी](../hi-IN/README.md) | [ไทย](../th-TH/README.md)
 
 Testes de aceitação em Playwright para um serviço Yin-Panel em execução e a extensão de navegador descompactada. A suíte controla navegadores reais contra a aplicação Core — e a substituição da nova aba da extensão — para que os fluxos entre repositórios sejam verificados ponta a ponta: login e contas, espaços e permissões, itens e transferência de favoritos, o sistema de temas e o comportamento de PWA. Uma suíte k6 separada mede o mesmo serviço sob carga.
 

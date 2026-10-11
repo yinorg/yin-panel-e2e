@@ -1,6 +1,6 @@
 # Yin-Panel エンドツーエンド受け入れテスト
 
-[English](../../README.md) | [简体中文](../zh-CN/README.md) | [繁體中文](../zh-TW/README.md) | **日本語** | [한국어](../ko-KR/README.md) | [Deutsch](../de-DE/README.md) | [Français](../fr-FR/README.md) | [Español](../es-ES/README.md) | [Português (Brasil)](../pt-BR/README.md) | [Русский](../ru-RU/README.md)
+[English](../../README.md) | [简体中文](../zh-CN/README.md) | [繁體中文](../zh-TW/README.md) | **日本語** | [한국어](../ko-KR/README.md) | [Deutsch](../de-DE/README.md) | [Français](../fr-FR/README.md) | [Español](../es-ES/README.md) | [Português (Brasil)](../pt-BR/README.md) | [Русский](../ru-RU/README.md) | [Bahasa Indonesia](../id-ID/README.md) | [Türkçe](../tr-TR/README.md) | [Polski](../pl-PL/README.md) | [Italiano](../it-IT/README.md) | [Nederlands](../nl-NL/README.md) | [हिन्दी](../hi-IN/README.md) | [ไทย](../th-TH/README.md)
 
 実行中の Yin-Panel サービスと未パッケージのブラウザー拡張機能に対する Playwright の受け入れテストです。このスイートは実際のブラウザーで Core アプリケーション、および拡張機能の新しいタブのオーバーライドを操作し、リポジトリをまたぐワークフローをエンドツーエンドで検証します：ログインとアカウント、スペースと権限、項目とブックマークの移行、テーマシステム、PWA の動作。別の k6 スイートが同じサービスを負荷時に計測します。
 

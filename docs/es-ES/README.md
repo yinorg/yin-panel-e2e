@@ -1,6 +1,6 @@
 # Pruebas de aceptación de extremo a extremo de Yin-Panel
 
-[English](../../README.md) | [简体中文](../zh-CN/README.md) | [繁體中文](../zh-TW/README.md) | [日本語](../ja-JP/README.md) | [한국어](../ko-KR/README.md) | [Deutsch](../de-DE/README.md) | [Français](../fr-FR/README.md) | **Español** | [Português (Brasil)](../pt-BR/README.md) | [Русский](../ru-RU/README.md)
+[English](../../README.md) | [简体中文](../zh-CN/README.md) | [繁體中文](../zh-TW/README.md) | [日本語](../ja-JP/README.md) | [한국어](../ko-KR/README.md) | [Deutsch](../de-DE/README.md) | [Français](../fr-FR/README.md) | **Español** | [Português (Brasil)](../pt-BR/README.md) | [Русский](../ru-RU/README.md) | [Bahasa Indonesia](../id-ID/README.md) | [Türkçe](../tr-TR/README.md) | [Polski](../pl-PL/README.md) | [Italiano](../it-IT/README.md) | [Nederlands](../nl-NL/README.md) | [हिन्दी](../hi-IN/README.md) | [ไทย](../th-TH/README.md)
 
 Pruebas de aceptación con Playwright para un servicio Yin-Panel en ejecución y la extensión del navegador sin empaquetar. La suite controla navegadores reales contra la aplicación Core —y la sustitución de la pestaña nueva de la extensión—, de modo que los flujos entre repositorios se verifican de extremo a extremo: inicio de sesión y cuentas, espacios y permisos, elementos y transferencia de marcadores, el sistema de temas y el comportamiento de la PWA. Una suite de k6 independiente mide el mismo servicio bajo carga.
 

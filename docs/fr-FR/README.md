@@ -1,6 +1,6 @@
 # Tests d'acceptation de bout en bout de Yin-Panel
 
-[English](../../README.md) | [简体中文](../zh-CN/README.md) | [繁體中文](../zh-TW/README.md) | [日本語](../ja-JP/README.md) | [한국어](../ko-KR/README.md) | [Deutsch](../de-DE/README.md) | **Français** | [Español](../es-ES/README.md) | [Português (Brasil)](../pt-BR/README.md) | [Русский](../ru-RU/README.md)
+[English](../../README.md) | [简体中文](../zh-CN/README.md) | [繁體中文](../zh-TW/README.md) | [日本語](../ja-JP/README.md) | [한국어](../ko-KR/README.md) | [Deutsch](../de-DE/README.md) | **Français** | [Español](../es-ES/README.md) | [Português (Brasil)](../pt-BR/README.md) | [Русский](../ru-RU/README.md) | [Bahasa Indonesia](../id-ID/README.md) | [Türkçe](../tr-TR/README.md) | [Polski](../pl-PL/README.md) | [Italiano](../it-IT/README.md) | [Nederlands](../nl-NL/README.md) | [हिन्दी](../hi-IN/README.md) | [ไทย](../th-TH/README.md)
 
 Tests d'acceptation Playwright pour un service Yin-Panel en cours d'exécution et l'extension de navigateur non empaquetée. La suite pilote de vrais navigateurs contre l'application Core — et la substitution du nouvel onglet par l'extension — afin de vérifier de bout en bout les flux inter-dépôts : connexion et comptes, espaces et permissions, éléments et transfert de signets, le système de thèmes et le comportement PWA. Une suite k6 distincte mesure le même service sous charge.
 

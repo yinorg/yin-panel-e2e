@@ -1,6 +1,6 @@
 # Yin-Panel 端到端验收测试
 
-[English](../../README.md) | **简体中文** | [繁體中文](../zh-TW/README.md) | [日本語](../ja-JP/README.md) | [한국어](../ko-KR/README.md) | [Deutsch](../de-DE/README.md) | [Français](../fr-FR/README.md) | [Español](../es-ES/README.md) | [Português (Brasil)](../pt-BR/README.md) | [Русский](../ru-RU/README.md)
+[English](../../README.md) | **简体中文** | [繁體中文](../zh-TW/README.md) | [日本語](../ja-JP/README.md) | [한국어](../ko-KR/README.md) | [Deutsch](../de-DE/README.md) | [Français](../fr-FR/README.md) | [Español](../es-ES/README.md) | [Português (Brasil)](../pt-BR/README.md) | [Русский](../ru-RU/README.md) | [Bahasa Indonesia](../id-ID/README.md) | [Türkçe](../tr-TR/README.md) | [Polski](../pl-PL/README.md) | [Italiano](../it-IT/README.md) | [Nederlands](../nl-NL/README.md) | [हिन्दी](../hi-IN/README.md) | [ไทย](../th-TH/README.md)
 
 针对运行中的 Yin-Panel 服务和未打包的浏览器扩展的 Playwright 验收测试。该套件驱动真实浏览器访问 Core 应用——以及扩展的新标签页覆盖——从而端到端验证跨仓库工作流：登录与账号、空间与权限、项目与书签迁移、主题系统以及 PWA 行为。单独的 k6 套件用于测量同一服务在负载下的表现。
 

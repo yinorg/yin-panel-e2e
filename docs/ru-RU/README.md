@@ -1,6 +1,6 @@
 # Сквозные приёмочные тесты Yin-Panel
 
-[English](../../README.md) | [简体中文](../zh-CN/README.md) | [繁體中文](../zh-TW/README.md) | [日本語](../ja-JP/README.md) | [한국어](../ko-KR/README.md) | [Deutsch](../de-DE/README.md) | [Français](../fr-FR/README.md) | [Español](../es-ES/README.md) | [Português (Brasil)](../pt-BR/README.md) | **Русский**
+[English](../../README.md) | [简体中文](../zh-CN/README.md) | [繁體中文](../zh-TW/README.md) | [日本語](../ja-JP/README.md) | [한국어](../ko-KR/README.md) | [Deutsch](../de-DE/README.md) | [Français](../fr-FR/README.md) | [Español](../es-ES/README.md) | [Português (Brasil)](../pt-BR/README.md) | **Русский** | [Bahasa Indonesia](../id-ID/README.md) | [Türkçe](../tr-TR/README.md) | [Polski](../pl-PL/README.md) | [Italiano](../it-IT/README.md) | [Nederlands](../nl-NL/README.md) | [हिन्दी](../hi-IN/README.md) | [ไทย](../th-TH/README.md)
 
 Приёмочные тесты на Playwright для запущенного сервиса Yin-Panel и распакованного расширения браузера. Набор управляет реальными браузерами против приложения Core — и переопределения новой вкладки расширения — поэтому кросс-репозиторные сценарии проверяются сквозным образом: вход и аккаунты, пространства и права, элементы и перенос закладок, система тем и поведение PWA. Отдельный набор на k6 измеряет тот же сервис под нагрузкой.
 

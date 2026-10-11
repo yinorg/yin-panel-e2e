@@ -1,6 +1,6 @@
 # Yin-Panel End-to-End-Abnahmetests
 
-[English](../../README.md) | [简体中文](../zh-CN/README.md) | [繁體中文](../zh-TW/README.md) | [日本語](../ja-JP/README.md) | [한국어](../ko-KR/README.md) | **Deutsch** | [Français](../fr-FR/README.md) | [Español](../es-ES/README.md) | [Português (Brasil)](../pt-BR/README.md) | [Русский](../ru-RU/README.md)
+[English](../../README.md) | [简体中文](../zh-CN/README.md) | [繁體中文](../zh-TW/README.md) | [日本語](../ja-JP/README.md) | [한국어](../ko-KR/README.md) | **Deutsch** | [Français](../fr-FR/README.md) | [Español](../es-ES/README.md) | [Português (Brasil)](../pt-BR/README.md) | [Русский](../ru-RU/README.md) | [Bahasa Indonesia](../id-ID/README.md) | [Türkçe](../tr-TR/README.md) | [Polski](../pl-PL/README.md) | [Italiano](../it-IT/README.md) | [Nederlands](../nl-NL/README.md) | [हिन्दी](../hi-IN/README.md) | [ไทย](../th-TH/README.md)
 
 Playwright-Abnahmetests für einen laufenden Yin-Panel-Dienst und die entpackte Browser-Erweiterung. Die Suite steuert echte Browser gegen die Core-Anwendung — und die Neuer-Tab-Überschreibung der Erweiterung —, sodass repositoryübergreifende Workflows durchgängig verifiziert werden: Anmeldung und Konten, Bereiche und Berechtigungen, Einträge und Lesezeichen-Übertragung, das Theme-System und das PWA-Verhalten. Eine separate k6-Suite misst denselben Dienst unter Last.
 

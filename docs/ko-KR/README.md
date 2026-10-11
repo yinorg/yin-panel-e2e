@@ -1,6 +1,6 @@
 # Yin-Panel 엔드투엔드 인수 테스트
 
-[English](../../README.md) | [简体中文](../zh-CN/README.md) | [繁體中文](../zh-TW/README.md) | [日本語](../ja-JP/README.md) | **한국어** | [Deutsch](../de-DE/README.md) | [Français](../fr-FR/README.md) | [Español](../es-ES/README.md) | [Português (Brasil)](../pt-BR/README.md) | [Русский](../ru-RU/README.md)
+[English](../../README.md) | [简体中文](../zh-CN/README.md) | [繁體中文](../zh-TW/README.md) | [日本語](../ja-JP/README.md) | **한국어** | [Deutsch](../de-DE/README.md) | [Français](../fr-FR/README.md) | [Español](../es-ES/README.md) | [Português (Brasil)](../pt-BR/README.md) | [Русский](../ru-RU/README.md) | [Bahasa Indonesia](../id-ID/README.md) | [Türkçe](../tr-TR/README.md) | [Polski](../pl-PL/README.md) | [Italiano](../it-IT/README.md) | [Nederlands](../nl-NL/README.md) | [हिन्दी](../hi-IN/README.md) | [ไทย](../th-TH/README.md)
 
 실행 중인 Yin-Panel 서비스와 압축을 풀어 둔(unpacked) 브라우저 확장 프로그램을 대상으로 하는 Playwright 인수 테스트입니다. 이 스위트는 실제 브라우저로 Core 애플리케이션과 확장 프로그램의 새 탭 재정의(new-tab override)를 구동하여 리포지토리를 넘나드는 워크플로를 종단 간 검증합니다: 로그인과 계정, 공간과 권한, 항목과 북마크 전송, 테마 시스템, PWA 동작. 별도의 k6 스위트가 동일한 서비스의 부하를 측정합니다.
 
